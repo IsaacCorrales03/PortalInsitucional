@@ -1,33 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
-from app.db.models import (
-    Specialty,
-    Course,
-    Section,
-    Applicant,
-    StudentProfile,
-)
 from app.api.deps import get_current_user, check_permission
+from app.db.session import get_db
+from app.db.models import *
 from app.db.models import User
+from app.schemas.specialty import *
 
 router = APIRouter(prefix="/specialties", tags=["specialties"])
-
-
-# =======================
-#       SCHEMAS
-# =======================
-
-class SpecialtyCreateSchema(BaseModel):
-    name: str
-    description: str | None = None
-
-
-class SpecialtyUpdateSchema(BaseModel):
-    name: str | None = None
-    description: str | None = None
 
 
 # =======================

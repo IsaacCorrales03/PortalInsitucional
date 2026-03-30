@@ -51,6 +51,17 @@ class StudentProfileCreate(BaseModel):
     enrolled_since: datetime.date | None = None
 
 
+class StudentProfileOut(BaseModel):
+    student_code: str
+    year_level: int
+    section_shift: str
+    status: str
+    enrolled_since: datetime.date | None
+    specialty_id: int
+    specialty_name: str
+
+    class Config:
+        from_attributes = True
 # =========================
 # PROFESORES
 # =========================

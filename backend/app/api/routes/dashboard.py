@@ -1,143 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import datetime
-from decimal import Decimal
 
-from app.db.session import get_db
-from app.db.models import (
-    AcademicPeriod,
-    Attendance,
-    Course,
-    Evaluation,
-    GradeReport,
-    Section,
-    SectionCourse,
-    SectionSpecialty,
-    Specialty,
-    StudentProfile,
-    Submission,
-    User,
-)
-from app.core.security import AuthenticatedUser
 from app.api.deps import get_current_user
+from app.core.security import AuthenticatedUser
+from app.db.session import get_db
+from app.db.models import *
+from app.schemas.section import *
+from app.schemas.user import *
+from app.schemas.courses import *
+from app.schemas.attendance import *
+from app.schemas.dashboard import *
+from app.utils.dashboard import *
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
-
-
-# ══════════════════════════════════════════════
-# Helpers
-# ══════════════════════════════════════════════
-
-def _require_student_profile(current_user: AuthenticatedUser, db: Session) -> StudentProfile:
-    profile = (
-        db.query(StudentProfile)
-        .filter(StudentProfile.user_id == current_user.id)
-        .first()
-    )
-    if not profile:
-        raise HTTPException(status_code=404, detail="Perfil de estudiante no encontrado")
-    return profile
-
-
-def _require_section(profile: StudentProfile, db: Session) -> Section:
-    if not profile.section_id:
-        raise HTTPException(status_code=404, detail="No tienes una sección asignada")
-    section = db.query(Section).filter(Section.id == profile.section_id).first()
-    if not section:
-        raise HTTPException(status_code=404, detail="Sección no encontrada")
-    return section
-
-
-# ══════════════════════════════════════════════
-# Schemas
-# ══════════════════════════════════════════════
-
-class StudentProfileOut(BaseModel):
-    student_code: str
-    year_level: int
-    section_shift: str
-    status: str
-    enrolled_since: datetime.date | None
-    specialty_id: int
-    specialty_name: str
-
-    class Config:
-        from_attributes = True
-
-
-class DashboardOut(BaseModel):
-    user_id: int
-    full_name: str
-    email: str
-    national_id: str
-    birth_date: datetime.date | None
-    phone: str | None
-    is_active: bool
-    created_at: datetime.datetime
-    roles: list[str]
-    profile: StudentProfileOut | None
-
-
-class SectionCourseOut(BaseModel):
-    course_name: str
-    professor_name: str
-    description: str | None
-
-
-class SectionOut(BaseModel):
-    section_name: str
-    academic_year: str
-    shift: str
-    specialty_name: str
-    section_part:str
-    guide_professor_name: str | None
-    courses: list[SectionCourseOut]
-
-
-class CourseOut(BaseModel):
-    course_id: int
-    course_name: str
-    description: str | None
-    professor_name: str
-
-
-class AttendanceRecordOut(BaseModel):
-    date: datetime.date
-    course_name: str
-    present: bool
-    late: bool
-    justification: str | None
-
-
-class AttendanceSummaryOut(BaseModel):
-    total: int
-    present: int
-    absent: int
-    late: int
-    attendance_rate: float
-    records: list[AttendanceRecordOut]
-
-
-class SubmissionOut(BaseModel):
-    evaluation_title: str
-    score: Decimal | None
-    weight_percent: Decimal | None
-    submitted_at: datetime.datetime | None
-
-
-class GradeReportOut(BaseModel):
-    period_id: int
-    period_name: str
-    course_name: str
-    final_grade: Decimal | None
-    status: str
-    submissions: list[SubmissionOut]
-
-
-# ══════════════════════════════════════════════
-# GET /dashboard/
-# ══════════════════════════════════════════════
 
 @router.get("/", response_model=DashboardOut)
 def get_dashboard(
@@ -180,17 +55,13 @@ def get_dashboard(
     )
 
 
-# ══════════════════════════════════════════════
-# GET /dashboard/me/section
-# ══════════════════════════════════════════════
-
 @router.get("/me/section", response_model=SectionOut)
 def get_my_section(
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = _require_student_profile(current_user, db)
-    section = _require_section(profile, db)
+    profile = require_student_profile(current_user, db)
+    section = require_section(profile, db)
 
     # Obtener especialidad según A/B directamente
     selected = (
@@ -240,17 +111,13 @@ def get_my_section(
         courses=courses_out,
     )
 
-# ══════════════════════════════════════════════
-# GET /dashboard/me/courses
-# ══════════════════════════════════════════════
-
 @router.get("/me/courses", response_model=list[CourseOut])
 def get_my_courses(
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = _require_student_profile(current_user, db)
-    section = _require_section(profile, db)
+    profile = require_student_profile(current_user, db)
+    section = require_section(profile, db)
 
     section_courses = (
         db.query(SectionCourse).filter(SectionCourse.section_id == section.id).all()
@@ -271,18 +138,14 @@ def get_my_courses(
     return result
 
 
-# ══════════════════════════════════════════════
-# GET /dashboard/me/attendance
-# ══════════════════════════════════════════════
-
 @router.get("/me/attendance", response_model=AttendanceSummaryOut)
 def get_my_attendance(
     section_id: int | None = None,
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = _require_student_profile(current_user, db)
-    section = _require_section(profile, db)
+    profile = require_student_profile(current_user, db)
+    section = require_section(profile, db)
 
     # Filtrar por sección específica o usar la sección del estudiante
     target_section_id = section_id if section_id else section.id
@@ -339,18 +202,14 @@ def get_my_attendance(
     )
 
 
-# ══════════════════════════════════════════════
-# GET /dashboard/me/grades
-# ══════════════════════════════════════════════
-
 @router.get("/me/grades", response_model=list[GradeReportOut])
 def get_my_grades(
     period_id: int | None = None,
     current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profile = _require_student_profile(current_user, db)
-    section = _require_section(profile, db)
+    profile = require_student_profile(current_user, db)
+    section = require_section(profile, db)
 
     query = db.query(GradeReport).filter(
         GradeReport.student_id == current_user.id,

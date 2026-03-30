@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import User, Role, UserRole
-from app.schemas.user import UserCreate, UserLogin, UserOut
+from app.schemas.user import *
+from app.schemas.auth import *
 from app.core.security import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,11 +39,7 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         "access_token": token,
         "token_type": "bearer"
     }
-class ChangePasswordSchema(BaseModel):
-    user_id: int
-    current_password: str = Field(..., min_length=6)
-    new_password: str = Field(..., min_length=6)
-    confirm_password: str = Field(..., min_length=6)
+
 
 @router.put("/change-password")
 def change_password(data: ChangePasswordSchema, db: Session = Depends(get_db)):

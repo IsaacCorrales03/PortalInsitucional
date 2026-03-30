@@ -34,3 +34,17 @@ class SectionCourseAssignSchema(BaseModel):
 class SectionCourseUpdateSchema(BaseModel):
     professor_id: int
 
+class SectionCourseOut(BaseModel):
+    course_name: str
+    professor_name: str
+    description: str | None
+
+
+class SectionOut(BaseModel):
+    section_name: str
+    academic_year: str
+    shift: str
+    specialty_name: str
+    section_part:str
+    guide_professor_name: str | None
+    courses: list[SectionCourseOut]

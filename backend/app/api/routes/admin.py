@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.api.deps import check_permission, get_current_user
-from app.api.routes.courses import CourseCreateSchema, CourseUpdateSchema
 from app.core.security import hash_password, AuthenticatedUser
 from app.db.models import *
 from app.db.session import get_db
@@ -49,7 +48,6 @@ def list_users(
         })
 
     return result
-
 
 @router.post("/users/create")
 def create_user(
@@ -145,7 +143,6 @@ def create_user(
 
     return {"id": user.id, "email": user.email, "role": role.name, "password": password}
 
-
 @router.put("/users/{user_id}")
 def edit_user(
     user_id: int,
@@ -183,7 +180,6 @@ def edit_user(
         "is_active": user.is_active,
     }
 
-
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: int,
@@ -209,7 +205,6 @@ def delete_user(
     db.commit()
 
     return {"detail": f"Usuario {user.email} eliminado"}
-
 
 @router.get("/users/{user_id}/permissions")
 def get_user_permissions(
@@ -268,7 +263,6 @@ def list_professors(
 
     return result
 
-
 @router.get("/professors/by-course/{course_id}")
 def list_professors_by_course(
     course_id: int,
@@ -288,7 +282,6 @@ def list_professors_by_course(
 
     return [{"id": p.id, "full_name": p.full_name, "email": p.email} for p in professors]
 
-
 @router.get("/professors/{professor_id}/courses")
 def get_professor_courses(
     professor_id: int,
@@ -297,7 +290,6 @@ def get_professor_courses(
     return db.query(ProfessorCourse).filter(
         ProfessorCourse.professor_id == professor_id
     ).all()
-
 
 @router.post("/professors/{professor_id}/courses")
 def assign_courses_to_professor(
@@ -340,7 +332,6 @@ def assign_courses_to_professor(
 
     return {"assigned": len(created), "total_requested": len(data.course_ids)}
 
-
 @router.delete("/professors/{professor_id}/courses/{course_id}")
 def remove_professor_course(
     professor_id: int,
@@ -359,7 +350,6 @@ def remove_professor_course(
     db.commit()
 
     return {"ok": True}
-
 
 @router.post("/professors/{professor_id}/availability")
 def add_availability(
@@ -404,7 +394,6 @@ def add_availability(
 
     return {"ok": True}
 
-
 # ══════════════════════════════════════════════════════════════
 # CURSOS
 # ══════════════════════════════════════════════════════════════
@@ -429,7 +418,6 @@ def list_courses(
         for c in courses
     ]
 
-
 @router.get("/courses/{course_id}")
 def get_course(
     course_id: int,
@@ -450,7 +438,6 @@ def get_course(
         "year_level": course.year_level,
         "is_guide": course.is_guide,
     }
-
 
 @router.post("/courses")
 def create_course(
@@ -476,7 +463,6 @@ def create_course(
     db.refresh(course)
 
     return {"id": course.id, "name": course.name}
-
 
 @router.put("/courses/{course_id}")
 def update_course(
@@ -539,11 +525,9 @@ def delete_course(
 
     return {"detail": f"Curso '{course.name}' eliminado"}
 
-
 # ══════════════════════════════════════════════════════════════
 # SECCIONES
 # ══════════════════════════════════════════════════════════════
-
 @router.get("/sections")
 def list_sections(
     specialty_id: int | None = None,
@@ -592,7 +576,6 @@ def list_sections(
         })
 
     return result
-
 
 @router.post("/sections")
 def create_section(
@@ -675,7 +658,6 @@ def create_section(
 
     return {"id": section.id, "name": section.name, "academic_year": section.academic_year}
 
-
 @router.put("/sections/{section_id}")
 def update_section(
     section_id: int,
@@ -734,7 +716,6 @@ def update_section(
 
     return {"id": section.id, "name": section.name, "academic_year": section.academic_year}
 
-
 @router.delete("/sections/{section_id}")
 def delete_section(
     section_id: int,
@@ -754,7 +735,6 @@ def delete_section(
     db.commit()
 
     return {"detail": f"Sección '{section.name}' eliminada"}
-
 
 @router.post("/sections/{section_id}/courses")
 def assign_course_to_section(
@@ -794,7 +774,6 @@ def assign_course_to_section(
     db.refresh(sc)
     return {"id": sc.id, "section_id": sc.section_id, "course_id": sc.course_id, "professor_id": sc.professor_id}
 
-
 @router.put("/sections/{section_id}/courses/{section_course_id}")
 def update_section_course(
     section_id: int,
@@ -826,7 +805,6 @@ def update_section_course(
 
     return {"id": sc.id, "section_id": sc.section_id, "course_id": sc.course_id, "professor_id": sc.professor_id}
 
-
 @router.delete("/sections/{section_id}/courses/{section_course_id}")
 def remove_course_from_section(
     section_id: int,
@@ -847,7 +825,6 @@ def remove_course_from_section(
     db.commit()
 
     return {"detail": "Curso removido de la sección"}
-
 
 @router.get("/study-plans/by-year-level/{year_level}")
 def get_study_plan_by_year_level(
@@ -929,7 +906,6 @@ def get_enrollment(
         "status": enrollment.status,
     }
 
-
 @router.post("/enrollments")
 def enroll_student(
     data: EnrollmentCreateSchema,
@@ -966,7 +942,6 @@ def enroll_student(
         "status": enrollment.status,
     }
 
-
 @router.put("/enrollments/{user_id}/{section_id}")
 def update_enrollment(
     user_id: int,
@@ -995,7 +970,6 @@ def update_enrollment(
         "status": enrollment.status,
     }
 
-
 @router.delete("/enrollments/{user_id}/{section_id}")
 def delete_enrollment(
     user_id: int,
@@ -1010,7 +984,6 @@ def delete_enrollment(
     db.commit()
 
     return {"detail": f"Estudiante {user_id} dado de baja de la sección {section_id}"}
-
 
 # ══════════════════════════════════════════════════════════════
 # PERMISOS
@@ -1027,7 +1000,6 @@ def list_permissions(
         {"id": p.id, "code": p.code, "description": p.description}
         for p in db.query(Permission).all()
     ]
-
 
 @router.post("/permissions")
 def create_permission(
