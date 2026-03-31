@@ -5,7 +5,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 import datetime
 from decimal import Decimal
-
+from app.db.base import Base
 
 # =========================
 # USERS
@@ -29,7 +29,7 @@ class User(DeclarativeBase):
 # =========================
 # ROLES & PERMISSIONS
 # =========================
-class Role(DeclarativeBase):
+class Role(Base):
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -37,7 +37,7 @@ class Role(DeclarativeBase):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
-class Permission(DeclarativeBase):
+class Permission(Base):
     """
     Permisos granulares del sistema. Códigos posibles:
       schedule_meetings     → programar reuniones
@@ -55,7 +55,7 @@ class Permission(DeclarativeBase):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
-class RolePermission(DeclarativeBase):
+class RolePermission(Base):
     __tablename__ = "role_permissions"
 
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), primary_key=True)
@@ -64,7 +64,7 @@ class RolePermission(DeclarativeBase):
     )
 
 
-class UserRole(DeclarativeBase):
+class UserRole(Base):
     __tablename__ = "user_roles"
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
@@ -74,7 +74,7 @@ class UserRole(DeclarativeBase):
 # =========================
 # SPECIALTIES
 # =========================
-class Specialty(DeclarativeBase):
+class Specialty(Base):
     __tablename__ = "specialties"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -87,7 +87,7 @@ class Specialty(DeclarativeBase):
 # Entidad independiente de users. No tienen cuenta en el sistema.
 # Al ser aprobados y matriculados, se crea User + StudentProfile.
 # =========================
-class Applicant(DeclarativeBase):
+class Applicant(Base):
     """
     status:
       'pendiente'   → recién ingresado, sin revisar
@@ -130,7 +130,7 @@ class Applicant(DeclarativeBase):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class ApplicantDocument(DeclarativeBase):
+class ApplicantDocument(Base):
     """
     document_type: 'acta_nacimiento' | 'notas_previas' | 'cedula' | 'foto' | 'otro'
     review_status: 'pendiente' | 'aprobado' | 'rechazado'
@@ -152,7 +152,7 @@ class ApplicantDocument(DeclarativeBase):
     )
 
 
-class ApplicantInterview(DeclarativeBase):
+class ApplicantInterview(Base):
     """Entrevista realizada por un administrativo o docente al postulante."""
     __tablename__ = "applicant_interviews"
 
@@ -169,7 +169,7 @@ class ApplicantInterview(DeclarativeBase):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class ApplicantTest(DeclarativeBase):
+class ApplicantTest(Base):
     """Prueba de diagnóstico / admisión aplicada al postulante."""
     __tablename__ = "applicant_tests"
 
@@ -189,7 +189,7 @@ class ApplicantTest(DeclarativeBase):
 # STUDENT PROFILE (Estudiantes oficiales)
 # Una única especialidad asignada. Existe solo tras matricularse.
 # =========================
-class StudentProfile(DeclarativeBase):
+class StudentProfile(Base):
     """
     year_level: 1 | 2 | 3  (año técnico)
     section_shift: 'diurna' | 'nocturna'
@@ -215,7 +215,7 @@ class StudentProfile(DeclarativeBase):
     )
 
 
-class Scholarship(DeclarativeBase):
+class Scholarship(Base):
     """
     type: 'transporte' | 'alimentacion'
     status: 'activa' | 'suspendida' | 'finalizada'
@@ -240,7 +240,7 @@ class Scholarship(DeclarativeBase):
 # =========================
 # PROFESSOR PROFILE
 # =========================
-class ProfessorProfile(DeclarativeBase):
+class ProfessorProfile(Base):
     """
     current_status:
       'disponible' | 'en_reunion' | 'salio_antes' | 'ausente' | 'permiso'
@@ -262,7 +262,7 @@ class ProfessorProfile(DeclarativeBase):
 # =========================
 # ADMINISTRATIVE PROFILE
 # =========================
-class AdministrativeProfile(DeclarativeBase):
+class AdministrativeProfile(Base):
     """
     section_shift: 'diurna' | 'nocturna' | 'completo'
     El nivel de privilegio se gestiona mediante roles y permisos,
@@ -278,7 +278,7 @@ class AdministrativeProfile(DeclarativeBase):
 # =========================
 # COURSES & SECTIONS
 # =========================
-class Course(DeclarativeBase):
+class Course(Base):
     __tablename__ = "courses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -292,7 +292,7 @@ class Course(DeclarativeBase):
     year_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class Section(DeclarativeBase):
+class Section(Base):
     __tablename__ = "sections"
 
     id = mapped_column(Integer, primary_key=True)
@@ -300,7 +300,7 @@ class Section(DeclarativeBase):
     academic_year = mapped_column(String(20), nullable=False)
     guide_professor_id = mapped_column(ForeignKey("users.id"), nullable=True)
 
-class SectionSpecialty(DeclarativeBase):
+class SectionSpecialty(Base):
     __tablename__ = "section_specialties"
 
     id = mapped_column(Integer, primary_key=True)
@@ -310,7 +310,7 @@ class SectionSpecialty(DeclarativeBase):
 
     part = mapped_column(String(1), nullable=False)  # "A" o "B"
 
-class SectionCourse(DeclarativeBase):
+class SectionCourse(Base):
     __tablename__ = "section_courses"
 
     id = mapped_column(Integer, primary_key=True)
@@ -324,7 +324,7 @@ class SectionCourse(DeclarativeBase):
         UniqueConstraint("section_id", "course_id"), 
     )
 
-class Schedule(DeclarativeBase):
+class Schedule(Base):
     """Horario de una sección. day_of_week: 'lunes' | 'martes' | ..."""
     __tablename__ = "schedules"
 
@@ -338,7 +338,7 @@ class Schedule(DeclarativeBase):
     room: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
-class Enrollment(DeclarativeBase):
+class Enrollment(Base):
     """status: 'activo' | 'retirado' | 'aprobado' | 'reprobado'"""
     __tablename__ = "enrollments"
     __table_args__ = (UniqueConstraint("user_id", "section_id"),)
@@ -356,7 +356,7 @@ class Enrollment(DeclarativeBase):
 # =========================
 # ACADEMIC PERIODS
 # =========================
-class AcademicPeriod(DeclarativeBase):
+class AcademicPeriod(Base):
     """e.g. name='I Trimestre 2025', academic_year='2025'"""
     __tablename__ = "academic_periods"
 
@@ -370,7 +370,7 @@ class AcademicPeriod(DeclarativeBase):
 # =========================
 # ATTENDANCE
 # =========================
-class Attendance(DeclarativeBase):
+class Attendance(Base):
     __tablename__ = "attendance"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -390,7 +390,7 @@ class Attendance(DeclarativeBase):
 # =========================
 # GROUPS
 # =========================
-class Group(DeclarativeBase):
+class Group(Base):
     __tablename__ = "groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -400,7 +400,7 @@ class Group(DeclarativeBase):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
-class GroupMember(DeclarativeBase):
+class GroupMember(Base):
     __tablename__ = "group_members"
 
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), primary_key=True)
@@ -410,7 +410,7 @@ class GroupMember(DeclarativeBase):
 # =========================
 # EVALUATIONS & GRADE REPORTS
 # =========================
-class Evaluation(DeclarativeBase):
+class Evaluation(Base):
     __tablename__ = "evaluations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -428,7 +428,7 @@ class Evaluation(DeclarativeBase):
     due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
 
 
-class Submission(DeclarativeBase):
+class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -446,7 +446,7 @@ class Submission(DeclarativeBase):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class GradeReport(DeclarativeBase):
+class GradeReport(Base):
     """
     Boletín de calificaciones final por período y sección.
     status: 'pendiente' | 'aprobado' | 'reprobado'
@@ -471,7 +471,7 @@ class GradeReport(DeclarativeBase):
 # =========================
 # MEETINGS
 # =========================
-class Meeting(DeclarativeBase):
+class Meeting(Base):
     """
     Requiere permiso: schedule_meetings
     status: 'programada' | 'en_curso' | 'finalizada' | 'cancelada'
@@ -487,7 +487,7 @@ class Meeting(DeclarativeBase):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
-class MeetingAttendee(DeclarativeBase):
+class MeetingAttendee(Base):
     """
     role: 'organizador' | 'participante' | 'opcional'
     rsvp_status: 'pendiente' | 'confirmado' | 'rechazado'
@@ -505,7 +505,7 @@ class MeetingAttendee(DeclarativeBase):
 # =========================
 # ANNOUNCEMENTS
 # =========================
-class Announcement(DeclarativeBase):
+class Announcement(Base):
     """
     Requiere permiso: send_announcements
 
@@ -530,7 +530,7 @@ class Announcement(DeclarativeBase):
 # =========================
 # EVENTS (Eventos institucionales)
 # =========================
-class Event(DeclarativeBase):
+class Event(Base):
     """
     type: 'academico' | 'cultural' | 'deportivo' | 'administrativo'
     status: 'programado' | 'en_curso' | 'finalizado' | 'cancelado'
@@ -564,7 +564,7 @@ class Event(DeclarativeBase):
     )
 
 
-class StudyPlan(DeclarativeBase):
+class StudyPlan(Base):
     __tablename__ = "study_plans"
 
     id = mapped_column(Integer, primary_key=True)
@@ -573,7 +573,7 @@ class StudyPlan(DeclarativeBase):
     year_level = mapped_column(Integer, nullable=False)
     specialty_id = mapped_column(ForeignKey("specialties.id"), nullable=True)
 
-class StudyPlanCourse(DeclarativeBase):
+class StudyPlanCourse(Base):
     __tablename__ = "study_plan_courses"
 
     id = mapped_column(Integer, primary_key=True)
@@ -582,7 +582,7 @@ class StudyPlanCourse(DeclarativeBase):
 
     part = mapped_column(String(1), nullable=True)  # A / B / NULL
 
-class SectionStudyPlan(DeclarativeBase):
+class SectionStudyPlan(Base):
     __tablename__ = "section_study_plans"
 
     id = mapped_column(Integer, primary_key=True)
@@ -592,7 +592,7 @@ class SectionStudyPlan(DeclarativeBase):
 
     part = mapped_column(String(1), nullable=True)  # A / B / NULL
 
-class ProfessorCourse(DeclarativeBase):
+class ProfessorCourse(Base):
     __tablename__ = "professor_courses"
 
     professor_id = mapped_column(ForeignKey("users.id"), primary_key=True)
@@ -601,7 +601,7 @@ class ProfessorCourse(DeclarativeBase):
 # =========================
 # PROFESSOR AVAILABILITY
 # =========================
-class ProfessorAvailability(DeclarativeBase):
+class ProfessorAvailability(Base):
     __tablename__ = "professor_availabilities"
 
     id = mapped_column(Integer, primary_key=True)
@@ -619,7 +619,7 @@ class ProfessorAvailability(DeclarativeBase):
 # =========================
 # VOTATION SYSTEM
 # =========================
-class Election(DeclarativeBase):
+class Election(Base):
     """
     status: 'pendiente' | 'abierta' | 'cerrada'
     """
