@@ -637,3 +637,37 @@ class Election(Base):
 # id_plan
 # propuestasPlan: relaciona el id, plan de gobierno, con una propuesta
 # propuesta: Objetivo, tiempo de realización, prioridad, descrion
+class ElectionParty(Base):
+    """Lista/partido que participa en una elección."""
+
+    __tablename__ = "election_parties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    election_id: Mapped[int] = mapped_column(ForeignKey("elections.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    #description: Mapped[str] = mapped_column(String(255), nullable=False)
+    candidate_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    photo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+
+class ElectionVote(Base):
+    """
+    Un voto por estudiante por elección.
+    - user_id es único por election_id.
+    - Nunca se elimina un voto. is_valid=False para votos nulos.
+    - No exponer la unión usuario<->partido en endpoints públicos/admin de resultados.
+    """
+
+    __tablename__ = "election_votes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    election_id: Mapped[int] = mapped_column(ForeignKey("elections.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    party_id: Mapped[int] = mapped_column(ForeignKey("election_parties.id"), nullable=False)
+    is_valid: Mapped[int] = mapped_column(Boolean, default=True)
+    revoked_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    revoked_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    voted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("election_id", "student_id", name="uq_one_vote_per_student"),
+    )
