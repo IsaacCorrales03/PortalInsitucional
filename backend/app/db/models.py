@@ -1,3 +1,5 @@
+from warnings import deprecated
+
 from sqlalchemy import (
     String, Integer, ForeignKey, Date, Boolean,
     Time, DateTime, Numeric, Text, UniqueConstraint
@@ -316,27 +318,75 @@ class SectionCourse(Base):
 
     section_id = mapped_column(ForeignKey("sections.id"), nullable=False)
     course_id = mapped_column(ForeignKey("courses.id"), nullable=False)
-
     professor_id = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    # NULL → materia académica (ambas partes juntas)
+    # "A" o "B" → materia técnica (parte específica)
     section_part = mapped_column(String(1), nullable=True)
+
     __table_args__ = (
-        UniqueConstraint("section_id", "course_id", "section_part"), 
+        UniqueConstraint("section_id", "course_id", "section_part"),
+        # Regla de aplicación: si course.is_technical=False,
+        # section_part debe ser NULL y solo puede existir una fila
+        # si course.is_technical=True,
+        # section_part debe ser "A" o "B", máximo dos filas por course+section
     )
 
-class Schedule(Base):
-    """Horario de una sección. day_of_week: 'lunes' | 'martes' | ..."""
-    __tablename__ = "schedules"
+class LessonSlot(Base):
+    __tablename__ = "lesson_slots"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    section_id: Mapped[int] = mapped_column(
-        ForeignKey("sections.id"), nullable=False
+    id = mapped_column(Integer, primary_key=True)
+    number = mapped_column(Integer, nullable=False, unique=True)  # 1–12
+
+    start_time = mapped_column(Time, nullable=False)
+    end_time = mapped_column(Time, nullable=False)
+
+class ScheduleLesson(Base):
+    __tablename__ = "schedule_lessons"
+
+    id = mapped_column(Integer, primary_key=True)
+
+    section_id = mapped_column(ForeignKey("sections.id"), nullable=False)
+    section_course_id = mapped_column(ForeignKey("section_courses.id"), nullable=False)
+    professor_id = mapped_column(ForeignKey("users.id"), nullable=False)  # desnormalizado para poder restringir
+
+    day_of_week = mapped_column(Integer, nullable=False)  # 1–5 en lugar de String, más consistente
+    lesson_number = mapped_column(Integer, nullable=False)  # 1–12
+
+    section_part = mapped_column(String(1), nullable=True)  # "A" | "B" | NULL (académicas)
+
+    classroom_id = mapped_column(ForeignKey("classrooms.id"), nullable=False)
+
+    __table_args__ = (
+        # Un aula no puede tener dos clases al mismo tiempo
+        UniqueConstraint("classroom_id", "day_of_week", "lesson_number"),
+
+        # Un profesor no puede estar en dos lugares al mismo tiempo
+        UniqueConstraint("professor_id", "day_of_week", "lesson_number"),
+
+        # Una sección/parte no puede tener dos materias en el mismo slot
+        # Cubre tanto académicas (part=NULL) como técnicas (part=A o part=B)
+        UniqueConstraint("section_id", "section_part", "day_of_week", "lesson_number"),
     )
-    day_of_week: Mapped[str] = mapped_column(String(20), nullable=False)
-    start_time: Mapped[datetime.time] = mapped_column(Time, nullable=False)
-    end_time: Mapped[datetime.time] = mapped_column(Time, nullable=False)
-    room: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+class Classroom(Base):
+    __tablename__ = "classrooms"
 
+    id = mapped_column(Integer, primary_key=True)
+
+    name = mapped_column(String(50), nullable=False, unique=True)  # "Aula 204"
+    building = mapped_column(String(100), nullable=True)           # opcional
+    floor = mapped_column(Integer, nullable=True)
+
+    capacity = mapped_column(Integer, nullable=True)
+
+    type = mapped_column(String(50), nullable=True)  
+    # 'regular' | 'laboratorio' | 'gimnasio' | etc.
+
+    has_projector = mapped_column(Boolean, default=False)
+    has_computers = mapped_column(Boolean, default=False)
+
+    is_active = mapped_column(Boolean, default=True)
 class Enrollment(Base):
     """status: 'activo' | 'retirado' | 'aprobado' | 'reprobado'"""
     __tablename__ = "enrollments"
@@ -580,6 +630,7 @@ class StudyPlanCourse(Base):
     course_id = mapped_column(ForeignKey("courses.id"), nullable=False)
 
     part = mapped_column(String(1), nullable=True)  # A / B / NULL
+    weekly_lessons = mapped_column(Integer, nullable=False)
 
 class SectionStudyPlan(Base):
     __tablename__ = "section_study_plans"
@@ -600,21 +651,21 @@ class ProfessorCourse(Base):
 # =========================
 # PROFESSOR AVAILABILITY
 # =========================
-class ProfessorAvailability(Base):
-    __tablename__ = "professor_availabilities"
+class ProfessorAvailabilitySlot(Base):
+    __tablename__ = "professor_availability_slots"
 
     id = mapped_column(Integer, primary_key=True)
 
     professor_id = mapped_column(ForeignKey("users.id"), nullable=False)
+    day_of_week = mapped_column(Integer, nullable=False)   # 1–5 (lunes a viernes)
+    lesson_number = mapped_column(Integer, nullable=False)  # 1–12
 
-    day_of_week = mapped_column(String(20), nullable=False)  # lunes, martes, etc.
-    start_time = mapped_column(Time, nullable=False)
-    end_time = mapped_column(Time, nullable=False)
-
+    # La presencia de una fila = disponible en ese slot
+    # La ausencia = no disponible
     __table_args__ = (
-        UniqueConstraint("professor_id", "day_of_week", "start_time", "end_time"),
+        UniqueConstraint("professor_id", "day_of_week", "lesson_number"),
     )
-
+    
 # =========================
 # VOTATION SYSTEM
 # =========================
@@ -636,14 +687,14 @@ class Election(Base):
 # Plan de gobierno: tiene gobierno al que pertenece
 # id_plan
 # propuestasPlan: relaciona el id, plan de gobierno, con una propuesta
-# propuesta: Objetivo, tiempo de realización, prioridad, descrion
+# propuesta: Objetivo, tiempo de realización, prioridad, descripción
 class ElectionParty(Base):
     """Lista/partido que participa en una elección."""
 
     __tablename__ = "election_parties"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    election_id: Mapped[int] = mapped_column(ForeignKey("elections.id"), nullable=False)
+    election_id: Mapped[int] = mapped_column(ForeignKey("election.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     #description: Mapped[str] = mapped_column(String(255), nullable=False)
     candidate_name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -660,7 +711,7 @@ class ElectionVote(Base):
     __tablename__ = "election_votes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    election_id: Mapped[int] = mapped_column(ForeignKey("elections.id"), nullable=False)
+    election_id: Mapped[int] = mapped_column(ForeignKey("election.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     party_id: Mapped[int] = mapped_column(ForeignKey("election_parties.id"), nullable=False)
     is_valid: Mapped[int] = mapped_column(Boolean, default=True)
@@ -669,5 +720,5 @@ class ElectionVote(Base):
     voted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
 
     __table_args__ = (
-        UniqueConstraint("election_id", "student_id", name="uq_one_vote_per_student"),
+        UniqueConstraint("election_id", "user_id", name="uq_one_vote_per_student"),
     )

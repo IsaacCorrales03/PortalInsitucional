@@ -1,8 +1,8 @@
-"""initial schema
+"""init
 
-Revision ID: 7335c4719c57
+Revision ID: 9d7e376327e5
 Revises: 
-Create Date: 2026-03-21 22:46:24.450444
+Create Date: 2026-04-01 01:51:45.155701
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '7335c4719c57'
+revision: str = '9d7e376327e5'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -28,6 +28,27 @@ def upgrade() -> None:
     sa.Column('end_date', sa.Date(), nullable=False),
     sa.Column('academic_year', sa.String(length=20), nullable=False),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('classrooms',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=50), nullable=False),
+    sa.Column('building', sa.String(length=100), nullable=True),
+    sa.Column('floor', sa.Integer(), nullable=True),
+    sa.Column('capacity', sa.Integer(), nullable=True),
+    sa.Column('type', sa.String(length=50), nullable=True),
+    sa.Column('has_projector', sa.Boolean(), nullable=True),
+    sa.Column('has_computers', sa.Boolean(), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=True),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('name')
+    )
+    op.create_table('lesson_slots',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('number', sa.Integer(), nullable=False),
+    sa.Column('start_time', sa.Time(), nullable=False),
+    sa.Column('end_time', sa.Time(), nullable=False),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('number')
     )
     op.create_table('permissions',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -94,10 +115,22 @@ def upgrade() -> None:
     op.create_table('courses',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
+    sa.Column('is_guide', sa.Boolean(), nullable=False),
+    sa.Column('is_technical', sa.Boolean(), nullable=False),
     sa.Column('description', sa.String(length=500), nullable=True),
     sa.Column('specialty_id', sa.Integer(), nullable=True),
     sa.Column('year_level', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('election',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('year', sa.Integer(), nullable=False),
+    sa.Column('status', sa.String(length=30), nullable=False),
+    sa.Column('created_by', sa.Integer(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('closed_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('meetings',
@@ -110,6 +143,15 @@ def upgrade() -> None:
     sa.Column('location', sa.String(length=255), nullable=True),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('professor_availability_slots',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('professor_id', sa.Integer(), nullable=False),
+    sa.Column('day_of_week', sa.Integer(), nullable=False),
+    sa.Column('lesson_number', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('professor_id', 'day_of_week', 'lesson_number')
     )
     op.create_table('professor_profiles',
     sa.Column('user_id', sa.Integer(), nullable=False),
@@ -127,12 +169,41 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),
     sa.PrimaryKeyConstraint('role_id', 'permission_id')
     )
+    op.create_table('sections',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=20), nullable=False),
+    sa.Column('academic_year', sa.String(length=20), nullable=False),
+    sa.Column('guide_professor_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['guide_professor_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('study_plans',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('year_level', sa.Integer(), nullable=False),
+    sa.Column('specialty_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('user_roles',
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('role_id', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['role_id'], ['roles.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('user_id', 'role_id')
+    )
+    op.create_table('announcements',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('created_by', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=False),
+    sa.Column('content', sa.Text(), nullable=False),
+    sa.Column('target_role', sa.String(length=50), nullable=True),
+    sa.Column('target_section_id', sa.Integer(), nullable=True),
+    sa.Column('published_at', sa.DateTime(), nullable=True),
+    sa.Column('is_published', sa.Boolean(), nullable=False),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['target_section_id'], ['sections.id'], ),
+    sa.PrimaryKeyConstraint('id')
     )
     op.create_table('applicant_documents',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -169,53 +240,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['applicant_id'], ['applicants.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('meeting_attendees',
-    sa.Column('meeting_id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('role', sa.String(length=30), nullable=False),
-    sa.Column('rsvp_status', sa.String(length=30), nullable=False),
-    sa.ForeignKeyConstraint(['meeting_id'], ['meetings.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('meeting_id', 'user_id')
-    )
-    op.create_table('sections',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('course_id', sa.Integer(), nullable=False),
-    sa.Column('professor_id', sa.Integer(), nullable=False),
-    sa.Column('academic_year', sa.String(length=20), nullable=False),
-    sa.Column('shift', sa.String(length=20), nullable=True),
-    sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ),
-    sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('student_profiles',
-    sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('student_code', sa.String(length=50), nullable=False),
-    sa.Column('year_level', sa.Integer(), nullable=False),
-    sa.Column('specialty_id', sa.Integer(), nullable=False),
-    sa.Column('section_shift', sa.String(length=20), nullable=False),
-    sa.Column('status', sa.String(length=30), nullable=False),
-    sa.Column('enrolled_since', sa.Date(), nullable=True),
-    sa.Column('converted_from_applicant_id', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['converted_from_applicant_id'], ['applicants.id'], ),
-    sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('user_id'),
-    sa.UniqueConstraint('student_code')
-    )
-    op.create_table('announcements',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('created_by', sa.Integer(), nullable=False),
-    sa.Column('title', sa.String(length=255), nullable=False),
-    sa.Column('content', sa.Text(), nullable=False),
-    sa.Column('target_role', sa.String(length=50), nullable=True),
-    sa.Column('target_section_id', sa.Integer(), nullable=True),
-    sa.Column('published_at', sa.DateTime(), nullable=True),
-    sa.Column('is_published', sa.Boolean(), nullable=False),
-    sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['target_section_id'], ['sections.id'], ),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('attendance',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
@@ -230,9 +254,19 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('election_parties',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('election_id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=50), nullable=False),
+    sa.Column('candidate_name', sa.String(length=255), nullable=False),
+    sa.Column('photo_url', sa.String(length=500), nullable=False),
+    sa.ForeignKeyConstraint(['election_id'], ['election.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('enrollments',
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('section_part', sa.String(length=1), nullable=False),
     sa.Column('enrolled_at', sa.Date(), nullable=False),
     sa.Column('status', sa.String(length=30), nullable=False),
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
@@ -250,6 +284,23 @@ def upgrade() -> None:
     sa.Column('due_date', sa.Date(), nullable=True),
     sa.ForeignKeyConstraint(['period_id'], ['academic_periods.id'], ),
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('events',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('created_by', sa.Integer(), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=False),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('type', sa.String(length=50), nullable=False),
+    sa.Column('status', sa.String(length=30), nullable=False),
+    sa.Column('start_datetime', sa.DateTime(), nullable=False),
+    sa.Column('end_datetime', sa.DateTime(), nullable=True),
+    sa.Column('location', sa.String(length=255), nullable=True),
+    sa.Column('target_role', sa.String(length=50), nullable=True),
+    sa.Column('target_section_id', sa.Integer(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['target_section_id'], ['sections.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('grade_reports',
@@ -272,15 +323,117 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('schedules',
+    op.create_table('meeting_attendees',
+    sa.Column('meeting_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('role', sa.String(length=30), nullable=False),
+    sa.Column('rsvp_status', sa.String(length=30), nullable=False),
+    sa.ForeignKeyConstraint(['meeting_id'], ['meetings.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('meeting_id', 'user_id')
+    )
+    op.create_table('professor_courses',
+    sa.Column('professor_id', sa.Integer(), nullable=False),
+    sa.Column('course_id', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ),
+    sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('professor_id', 'course_id')
+    )
+    op.create_table('section_courses',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('section_id', sa.Integer(), nullable=False),
-    sa.Column('day_of_week', sa.String(length=20), nullable=False),
-    sa.Column('start_time', sa.Time(), nullable=False),
-    sa.Column('end_time', sa.Time(), nullable=False),
-    sa.Column('room', sa.String(length=50), nullable=True),
+    sa.Column('course_id', sa.Integer(), nullable=False),
+    sa.Column('professor_id', sa.Integer(), nullable=False),
+    sa.Column('section_part', sa.String(length=1), nullable=True),
+    sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ),
+    sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('section_id', 'course_id', 'section_part')
+    )
+    op.create_table('section_specialties',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('specialty_id', sa.Integer(), nullable=False),
+    sa.Column('part', sa.String(length=1), nullable=False),
+    sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
+    sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
     sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('section_study_plans',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('study_plan_id', sa.Integer(), nullable=False),
+    sa.Column('part', sa.String(length=1), nullable=True),
+    sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
+    sa.ForeignKeyConstraint(['study_plan_id'], ['study_plans.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('student_profiles',
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('student_code', sa.String(length=50), nullable=False),
+    sa.Column('year_level', sa.Integer(), nullable=False),
+    sa.Column('specialty_id', sa.Integer(), nullable=False),
+    sa.Column('section_shift', sa.String(length=20), nullable=False),
+    sa.Column('status', sa.String(length=30), nullable=False),
+    sa.Column('enrolled_since', sa.Date(), nullable=True),
+    sa.Column('converted_from_applicant_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['converted_from_applicant_id'], ['applicants.id'], ),
+    sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('user_id'),
+    sa.UniqueConstraint('student_code')
+    )
+    op.create_table('study_plan_courses',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('study_plan_id', sa.Integer(), nullable=False),
+    sa.Column('course_id', sa.Integer(), nullable=False),
+    sa.Column('part', sa.String(length=1), nullable=True),
+    sa.Column('weekly_lessons', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ),
+    sa.ForeignKeyConstraint(['study_plan_id'], ['study_plans.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_table('election_votes',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('election_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('party_id', sa.Integer(), nullable=False),
+    sa.Column('is_valid', sa.Boolean(), nullable=False),
+    sa.Column('revoked_by', sa.Integer(), nullable=True),
+    sa.Column('revoked_reason', sa.String(length=500), nullable=True),
+    sa.Column('voted_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['election_id'], ['election.id'], ),
+    sa.ForeignKeyConstraint(['party_id'], ['election_parties.id'], ),
+    sa.ForeignKeyConstraint(['revoked_by'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('election_id', 'user_id', name='uq_one_vote_per_student')
+    )
+    op.create_table('group_members',
+    sa.Column('group_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['group_id'], ['groups.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('group_id', 'user_id')
+    )
+    op.create_table('schedule_lessons',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('section_id', sa.Integer(), nullable=False),
+    sa.Column('section_course_id', sa.Integer(), nullable=False),
+    sa.Column('professor_id', sa.Integer(), nullable=False),
+    sa.Column('day_of_week', sa.Integer(), nullable=False),
+    sa.Column('lesson_number', sa.Integer(), nullable=False),
+    sa.Column('section_part', sa.String(length=1), nullable=True),
+    sa.Column('classroom_id', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['classroom_id'], ['classrooms.id'], ),
+    sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['section_course_id'], ['section_courses.id'], ),
+    sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('classroom_id', 'day_of_week', 'lesson_number'),
+    sa.UniqueConstraint('professor_id', 'day_of_week', 'lesson_number'),
+    sa.UniqueConstraint('section_id', 'section_part', 'day_of_week', 'lesson_number')
     )
     op.create_table('scholarships',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -294,13 +447,6 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['granted_by'], ['users.id'], ),
     sa.ForeignKeyConstraint(['student_id'], ['student_profiles.user_id'], ),
     sa.PrimaryKeyConstraint('id')
-    )
-    op.create_table('group_members',
-    sa.Column('group_id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.ForeignKeyConstraint(['group_id'], ['groups.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('group_id', 'user_id')
     )
     op.create_table('submissions',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -322,25 +468,36 @@ def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_table('submissions')
-    op.drop_table('group_members')
     op.drop_table('scholarships')
-    op.drop_table('schedules')
+    op.drop_table('schedule_lessons')
+    op.drop_table('group_members')
+    op.drop_table('election_votes')
+    op.drop_table('study_plan_courses')
+    op.drop_table('student_profiles')
+    op.drop_table('section_study_plans')
+    op.drop_table('section_specialties')
+    op.drop_table('section_courses')
+    op.drop_table('professor_courses')
+    op.drop_table('meeting_attendees')
     op.drop_table('groups')
     op.drop_table('grade_reports')
+    op.drop_table('events')
     op.drop_table('evaluations')
     op.drop_table('enrollments')
+    op.drop_table('election_parties')
     op.drop_table('attendance')
-    op.drop_table('announcements')
-    op.drop_table('student_profiles')
-    op.drop_table('sections')
-    op.drop_table('meeting_attendees')
     op.drop_table('applicant_tests')
     op.drop_table('applicant_interviews')
     op.drop_table('applicant_documents')
+    op.drop_table('announcements')
     op.drop_table('user_roles')
+    op.drop_table('study_plans')
+    op.drop_table('sections')
     op.drop_table('role_permissions')
     op.drop_table('professor_profiles')
+    op.drop_table('professor_availability_slots')
     op.drop_table('meetings')
+    op.drop_table('election')
     op.drop_table('courses')
     op.drop_table('applicants')
     op.drop_table('administrative_profiles')
@@ -348,5 +505,7 @@ def downgrade() -> None:
     op.drop_table('specialties')
     op.drop_table('roles')
     op.drop_table('permissions')
+    op.drop_table('lesson_slots')
+    op.drop_table('classrooms')
     op.drop_table('academic_periods')
     # ### end Alembic commands ###
