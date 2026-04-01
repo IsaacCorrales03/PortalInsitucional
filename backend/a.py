@@ -22,7 +22,11 @@ Reglas de sincronización A↔B:
 Reglas blandas:
   1. Distribuir materias académicas uniformemente en la semana.
   2. Minimizar huecos entre bloques en el día.
+
+pendiente, un profesor exclusivo por materia, es decir, español solo me lo dará el profesor asignado, no me pueden dar
+marvin y marta
 """
+
 
 from ortools.sat.python import cp_model
 
@@ -104,11 +108,25 @@ disponibilidad_prof: dict[int, list[list[int]]] = {
     17: disponibilidad_total(),        # Carlos M.
     18: disponibilidad_total(),        # Keneth C.
     19: disponibilidad_total(),        # William M.
-    20: disponibilidad_total(),        # Rebecca T.
+    20: disponibilidad_dias([0, 1]),        # Rebecca T.
     21: disponibilidad_total(),        # Lizeth O.
     22: disponibilidad_total(),        # Henry F.
     23: disponibilidad_total(),        # Gerardo S.
 }
+"""
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ███    ██  ██████      ████████  ██████   ██████   █████  ██████         ┃
+┃ ████   ██ ██    ██        ██    ██    ██ ██    ██ ██   ██ ██   ██        ┃
+┃ ██ ██  ██ ██    ██        ██    ██    ██ ██    ██ ███████ ██████         ┃
+┃ ██  ██ ██ ██    ██        ██    ██    ██ ██    ██ ██   ██ ██   ██        ┃
+┃ ██   ████  ██████         ██     ██████   ██████  ██   ██ ██   ██        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+=============================================================================
+el codigo acontinuación es una de las aberraciones brutales más increiblemente espantosas de la humanidad, funcionando 
+únicamente por lagrimas, sufrimiento y fé, no mover, alterar, modificar, o cambiar nada de todo lo que viene de aquí, hacia abajo
+ya que podría provocar que se ponga de mal humor y no vuelva a funcionar nunca, recomiendo encarecidamente no editar absolutamnte nada de 
+todo lo que está acá abajo
+"""
 
 profesores = {
     1:  {"Nombre": "Martha",    "Materias": ["Español"]},
