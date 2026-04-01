@@ -116,9 +116,9 @@ disponibilidad_prof: dict[int, list[list[int]]] = {
 """
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ ███    ██  ██████      ████████  ██████   ██████   █████  ██████         ┃
-┃ ████   ██ ██    ██        ██    ██    ██ ██    ██ ██   ██ ██   ██        ┃
-┃ ██ ██  ██ ██    ██        ██    ██    ██ ██    ██ ███████ ██████         ┃
-┃ ██  ██ ██ ██    ██        ██    ██    ██ ██    ██ ██   ██ ██   ██        ┃
+┃ ████   ██ ██    ██        ██    ██    ██ ██       ██   ██ ██   ██        ┃
+┃ ██ ██  ██ ██    ██        ██    ██    ██ ██       ███████ ██████         ┃
+┃ ██  ██ ██ ██    ██        ██    ██    ██ ██       ██   ██ ██   ██        ┃
 ┃ ██   ████  ██████         ██     ██████   ██████  ██   ██ ██   ██        ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 =============================================================================
@@ -346,7 +346,21 @@ def resolver_seccion(seccion_id: str, verbose: bool = False):
                 vd = [var for var, ip, dd, b_ini, tam in bloques_tec[parte][id_m] if dd == d]
                 if vd:
                     model.add(sum(vd) <= 1)
-
+    for id_m in compartidas:
+        profs = list({ip for _, ip, _, _, _ in bloques_comp[id_m]})
+        if len(profs) <= 1:
+            continue
+        # prof_activo[ip] = 1 si ese profesor imparte esta materia, 0 si no
+        prof_activo = {}
+        for ip in profs:
+            pa = model.new_bool_var(f"prof_activo_m{id_m}_p{ip}")
+            prof_activo[ip] = pa
+            # Si el prof no está activo, ninguno de sus bloques puede seleccionarse
+            bloques_del_prof = [var for var, p, _, _, _ in bloques_comp[id_m] if p == ip]
+            for var in bloques_del_prof:
+                model.add_implication(var, pa)
+        # Exactamente un profesor activo por materia
+        model.add(sum(prof_activo.values()) == 1)
     # R5. SINCRONIZACIÓN TÉCNICAS A↔B
     slot_tec: dict[str, dict[tuple, object]] = {p: {} for p in partes}
 
