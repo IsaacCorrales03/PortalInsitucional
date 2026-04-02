@@ -1,8 +1,8 @@
-"""init
+"""a
 
-Revision ID: 9d7e376327e5
+Revision ID: 4d793ac4699e
 Revises: 
-Create Date: 2026-04-01 01:51:45.155701
+Create Date: 2026-04-02 03:15:41.174598
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '9d7e376327e5'
+revision: str = '4d793ac4699e'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -31,14 +31,10 @@ def upgrade() -> None:
     )
     op.create_table('classrooms',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('name', sa.String(length=50), nullable=False),
-    sa.Column('building', sa.String(length=100), nullable=True),
-    sa.Column('floor', sa.Integer(), nullable=True),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('type', sa.Enum('NARANJA', 'VERDE', 'LAB_VERDE', 'LAB_NARANJA', 'ESPECIAL', 'GIMNASIO', name='classroomtype'), nullable=False),
     sa.Column('capacity', sa.Integer(), nullable=True),
-    sa.Column('type', sa.String(length=50), nullable=True),
-    sa.Column('has_projector', sa.Boolean(), nullable=True),
-    sa.Column('has_computers', sa.Boolean(), nullable=True),
-    sa.Column('is_active', sa.Boolean(), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
     )
@@ -112,14 +108,19 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['secondary_specialty_id'], ['specialties.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('classroom_availability_slots',
+    sa.Column('classroom_id', sa.Integer(), nullable=False),
+    sa.Column('day_of_week', sa.Integer(), nullable=False),
+    sa.Column('lesson_number', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['classroom_id'], ['classrooms.id'], ),
+    sa.PrimaryKeyConstraint('classroom_id', 'day_of_week', 'lesson_number')
+    )
     op.create_table('courses',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
-    sa.Column('is_guide', sa.Boolean(), nullable=False),
     sa.Column('is_technical', sa.Boolean(), nullable=False),
     sa.Column('description', sa.String(length=500), nullable=True),
     sa.Column('specialty_id', sa.Integer(), nullable=True),
-    sa.Column('year_level', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -145,20 +146,19 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('professor_availability_slots',
-    sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('professor_id', sa.Integer(), nullable=False),
     sa.Column('day_of_week', sa.Integer(), nullable=False),
     sa.Column('lesson_number', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['professor_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('professor_id', 'day_of_week', 'lesson_number')
+    sa.PrimaryKeyConstraint('professor_id', 'day_of_week', 'lesson_number')
     )
     op.create_table('professor_profiles',
     sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('specialty_area', sa.String(length=255), nullable=True),
-    sa.Column('current_status', sa.String(length=50), nullable=False),
+    sa.Column('specialty_id', sa.Integer(), nullable=True),
+    sa.Column('current_status', sa.Enum('DISPONIBLE', 'EN_REUNION', 'SALIO_ANTES', 'AUSENTE', 'PERMISO', name='professorstatus'), nullable=False),
     sa.Column('status_note', sa.String(length=255), nullable=True),
     sa.Column('status_updated_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('user_id')
     )
@@ -180,7 +180,7 @@ def upgrade() -> None:
     op.create_table('study_plans',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=100), nullable=False),
-    sa.Column('year_level', sa.Integer(), nullable=False),
+    sa.Column('year_level', sa.Integer(), nullable=True),
     sa.Column('specialty_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['specialty_id'], ['specialties.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -361,13 +361,12 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('section_study_plans',
-    sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('section_id', sa.Integer(), nullable=False),
     sa.Column('study_plan_id', sa.Integer(), nullable=False),
-    sa.Column('part', sa.String(length=1), nullable=True),
+    sa.Column('part', sa.String(length=1), nullable=False),
     sa.ForeignKeyConstraint(['section_id'], ['sections.id'], ),
     sa.ForeignKeyConstraint(['study_plan_id'], ['study_plans.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('section_id', 'study_plan_id', 'part')
     )
     op.create_table('student_profiles',
     sa.Column('user_id', sa.Integer(), nullable=False),
@@ -388,11 +387,11 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('study_plan_id', sa.Integer(), nullable=False),
     sa.Column('course_id', sa.Integer(), nullable=False),
-    sa.Column('part', sa.String(length=1), nullable=True),
     sa.Column('weekly_lessons', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['course_id'], ['courses.id'], ),
     sa.ForeignKeyConstraint(['study_plan_id'], ['study_plans.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('study_plan_id', 'course_id', name='uq_plan_course')
     )
     op.create_table('election_votes',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -499,6 +498,7 @@ def downgrade() -> None:
     op.drop_table('meetings')
     op.drop_table('election')
     op.drop_table('courses')
+    op.drop_table('classroom_availability_slots')
     op.drop_table('applicants')
     op.drop_table('administrative_profiles')
     op.drop_table('users')

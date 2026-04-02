@@ -369,19 +369,19 @@ def add_availability(
     if data.start_time >= data.end_time:
         raise HTTPException(400, "Rango inválido")
 
-    overlap = db.query(ProfessorAvailability).filter(
-        ProfessorAvailability.professor_id == professor_id,
-        ProfessorAvailability.day_of_week == data.day_of_week,
+    overlap = db.query(ProfessorAvailabilitySlot).filter(
+        ProfessorAvailabilitySlot.professor_id == professor_id,
+        ProfessorAvailabilitySlot.day_of_week == data.day_of_week,
         ~(
-            (data.end_time <= ProfessorAvailability.start_time) |
-            (data.start_time >= ProfessorAvailability.end_time)
+            (data.end_time <= ProfessorAvailabilitySlot.start_time) |
+            (data.start_time >= ProfessorAvailabilitySlot.end_time)
         ),
     ).first()
 
     if overlap:
         raise HTTPException(400, "Horario solapado")
 
-    db.add(ProfessorAvailability(
+    db.add(ProfessorAvailabilitySlot(
         professor_id=professor_id,
         day_of_week=data.day_of_week,
         start_time=data.start_time,
@@ -408,8 +408,6 @@ def list_courses(
             "name": c.name,
             "description": c.description,
             "specialty_id": c.specialty_id,
-            "year_level": c.year_level,
-            "is_guide": c.is_guide,
         }
         for c in courses
     ]
@@ -1100,3 +1098,508 @@ def delete_permission(
     db.commit()
 
     return {"detail": f"Permiso '{permission.code}' eliminado"}
+
+def _build_disponibilidad_prof(
+    professor_ids: list[int],
+    db: Session,
+    section_id: int,
+) -> dict[int, list[list[int]]]:
+    """
+    Construye mapa de disponibilidad {prof_id: [[0|1]*12]*5}.
+ 
+    Un slot se marca como NO disponible si:
+      - No existe en ProfessorAvailabilitySlot (no está en su horario permitido)
+      - Ya existe un ScheduleLesson con ese profesor en ese slot (ya ocupado)
+    """
+    # Slots ya ocupados globalmente por cada profesor
+    occupied: dict[int, set[tuple[int, int]]] = {pid: set() for pid in professor_ids}
+    busy_rows = (
+        db.query(ScheduleLesson.professor_id, ScheduleLesson.day_of_week, ScheduleLesson.lesson_number)
+        .filter(ScheduleLesson.professor_id.in_(professor_ids))
+        .all()
+    )
+    for pid, dow, ln in busy_rows:
+        occupied[pid].add((dow, ln - 1))  # lesson_number es 1-based → convertir a 0-based
+ 
+    disponibilidad: dict[int, list[list[int]]] = {}
+ 
+    for pid in professor_ids:
+        # Obtener slots permitidos de ProfessorAvailabilitySlot
+        allowed_slots = (
+            db.query(ProfessorAvailabilitySlot.day_of_week, ProfessorAvailabilitySlot.lesson_number)
+            .filter(ProfessorAvailabilitySlot.professor_id == pid)
+            .all()
+        )
+ 
+        if not allowed_slots:
+            # Sin registros → disponible en todo (compatibilidad con profesores sin config)
+            mapa = [[1] * NBLOCKS for _ in range(NDAYS)]
+        else:
+            mapa = [[0] * NBLOCKS for _ in range(NDAYS)]
+            for dow, ln in allowed_slots:
+                mapa[dow][ln - 1] = 1  # lesson_number 1-based → índice 0-based
+ 
+        # Marcar como no disponible los slots ya ocupados en ScheduleLesson
+        for dow, b in occupied[pid]:
+            if 0 <= dow < NDAYS and 0 <= b < NBLOCKS:
+                mapa[dow][b] = 0
+ 
+        disponibilidad[pid] = mapa
+ 
+    return disponibilidad
+ 
+ 
+def _build_disponibilidad_aulas(
+    classroom_ids: list[int],
+    db: Session,
+) -> dict[int, list[list[int]]]:
+    """
+    Construye mapa de disponibilidad {classroom_id: [[0|1]*12]*5}.
+    Usa ClassroomAvailabilitySlot como whitelist.
+    Sin registros → disponible todo.
+    """
+    disponibilidad: dict[int, list[list[int]]] = {}
+ 
+    for cid in classroom_ids:
+        slots = (
+            db.query(ClassroomAvailabilitySlot.day_of_week, ClassroomAvailabilitySlot.lesson_number)
+            .filter(ClassroomAvailabilitySlot.classroom_id == cid)
+            .all()
+        )
+        if not slots:
+            mapa = [[1] * NBLOCKS for _ in range(NDAYS)]
+        else:
+            mapa = [[0] * NBLOCKS for _ in range(NDAYS)]
+            for dow, ln in slots:
+                mapa[dow][ln - 1] = 1
+ 
+        disponibilidad[cid] = mapa
+ 
+    return disponibilidad
+ 
+ 
+def _horario_to_json(horario: dict) -> dict:
+    """
+    Convierte el dict interno {dia: {leccion: entry|None}} a un formato
+    JSON limpio y serializable.
+    """
+    out = {}
+    for dia, lecciones in horario.items():
+        out[dia] = {}
+        for num, entry in lecciones.items():
+            out[dia][num] = entry  # entry ya es dict o None
+    return out
+ 
+from app.utils.scheduler_generator import (
+    resolver_seccion,
+    NDAYS,
+    NBLOCKS,
+    DIAS,
+)
+
+
+
+@router.post("/seccion/{section_id}")
+def generate_schedule(
+    section_id: int,
+    tiempo_limite: float = 120.0,
+    num_workers: int = 8,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Genera el horario conjunto A+B para la sección indicada.
+ 
+    - Los profesores se obtienen desde ProfessorCourse (quién puede dar qué),
+      NO desde SectionCourse (que se genera aquí como resultado del solver).
+    - SectionCourse se recrea completamente desde el horario generado.
+    - ScheduleLesson previo de la sección se elimina antes de insertar.
+    """
+ 
+    # ── 1. Validar sección ────────────────────────────────────────────────────
+    section = db.query(Section).filter(Section.id == section_id).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Sección no encontrada")
+ 
+    # ── 2. Planes de estudio ──────────────────────────────────────────────────
+    ssp_rows = (
+        db.query(SectionStudyPlan)
+        .filter(SectionStudyPlan.section_id == section_id)
+        .all()
+    )
+    if not ssp_rows:
+        raise HTTPException(
+            status_code=400,
+            detail="La sección no tiene planes de estudio asignados",
+        )
+ 
+    plan_ids_A: list[int] = []
+    plan_ids_B: list[int] = []
+    for ssp in ssp_rows:
+        if ssp.part == "A":
+            plan_ids_A.append(ssp.study_plan_id)
+        elif ssp.part == "B":
+            plan_ids_B.append(ssp.study_plan_id)
+ 
+    if not plan_ids_A or not plan_ids_B:
+        raise HTTPException(
+            status_code=400,
+            detail="La sección debe tener planes para parte A y parte B",
+        )
+ 
+    # ── 3. Catálogo de cursos ─────────────────────────────────────────────────
+    all_plan_ids = list(set(plan_ids_A + plan_ids_B))
+    spc_rows = (
+        db.query(StudyPlanCourse)
+        .filter(StudyPlanCourse.study_plan_id.in_(all_plan_ids))
+        .all()
+    )
+    if not spc_rows:
+        raise HTTPException(
+            status_code=400,
+            detail="Los planes de estudio no tienen cursos asignados",
+        )
+ 
+    course_ids = list({r.course_id for r in spc_rows})
+    db_courses = db.query(Course).filter(Course.id.in_(course_ids)).all()
+    db_courses_map = {c.id: c for c in db_courses}
+ 
+    cursos: dict[int, dict] = {
+        c.id: {"Nombre": c.name, "es_tecnica": c.is_technical}
+        for c in db_courses
+    }
+ 
+    # ── 4. Plan de estudio para el scheduler ─────────────────────────────────
+    plan_estudio: dict[int, dict] = {}
+    for plan_id in all_plan_ids:
+        sp = db.query(StudyPlan).filter(StudyPlan.id == plan_id).first()
+        plan_estudio[plan_id] = {
+            "name": sp.name if sp else str(plan_id),
+            "courses": [
+                (r.course_id, r.weekly_lessons)
+                for r in spc_rows
+                if r.study_plan_id == plan_id
+            ],
+        }
+ 
+    # ── 5. secciones_config ───────────────────────────────────────────────────
+    seccion_str = str(section_id)
+    secciones_config: dict[str, dict] = {
+        seccion_str: {
+            "partes": {"A": plan_ids_A, "B": plan_ids_B},
+            "profesor_guia": section.guide_professor_id,
+        }
+    }
+ 
+    # ── 6. Profesores ─────────────────────────────────────────────────────────
+    # Fuente de verdad: ProfessorCourse filtrado por los cursos de los planes.
+    # SectionCourse NO se usa aquí — se genera después del solver.
+    prof_course_rows = (
+        db.query(ProfessorCourse)
+        .filter(ProfessorCourse.course_id.in_(course_ids))
+        .all()
+    )
+ 
+    professor_ids_set = {pc.professor_id for pc in prof_course_rows}
+    if section.guide_professor_id:
+        professor_ids_set.add(section.guide_professor_id)
+ 
+    if not professor_ids_set:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay profesores asignados a los cursos de esta sección",
+        )
+ 
+    professor_ids = list(professor_ids_set)
+    db_professors = db.query(User).filter(User.id.in_(professor_ids)).all()
+    db_professors_map = {p.id: p for p in db_professors}
+ 
+    # Materias por profesor
+    prof_materias: dict[int, list[str]] = {pid: [] for pid in professor_ids}
+    for pc in prof_course_rows:
+        course_obj = db_courses_map.get(pc.course_id)
+        if course_obj:
+            prof_materias[pc.professor_id].append(course_obj.name)
+ 
+    # Agregar "Guía" al profesor guía si corresponde
+    if section.guide_professor_id and section.guide_professor_id in prof_materias:
+        guia_course = next((c for c in db_courses if c.name == "Guía"), None)
+        if guia_course and guia_course.name not in prof_materias[section.guide_professor_id]:
+            prof_materias[section.guide_professor_id].append("Guía")
+ 
+    profesores: dict[int, dict] = {
+        pid: {
+            "Nombre":   db_professors_map[pid].full_name,
+            "Materias": prof_materias[pid],
+        }
+        for pid in professor_ids
+        if pid in db_professors_map
+    }
+ 
+    # ── 7. Disponibilidad de profesores (opción C) ────────────────────────────
+    disponibilidad_prof = _build_disponibilidad_prof(professor_ids, db, section_id)
+ 
+    # ── 8. Aulas ──────────────────────────────────────────────────────────────
+    db_classrooms = db.query(Classroom).filter(Classroom.is_active == True).all()
+    if not db_classrooms:
+        raise HTTPException(status_code=400, detail="No hay aulas activas registradas")
+ 
+    classroom_ids = [c.id for c in db_classrooms]
+    disponibilidad_aulas_map = _build_disponibilidad_aulas(classroom_ids, db)
+ 
+    aulas: dict[str, dict] = {
+        f"classroom_{c.id}": {
+            "tipo":           c.type.value,
+            "Nombre":         c.name,
+            "disponibilidad": disponibilidad_aulas_map[c.id],
+        }
+        for c in db_classrooms
+    }
+ 
+    # ── 9. Ejecutar el solver ─────────────────────────────────────────────────
+    hA, hB = resolver_seccion(
+        seccion_id          = seccion_str,
+        cursos              = cursos,
+        profesores          = profesores,
+        plan_estudio        = plan_estudio,
+        secciones_config    = secciones_config,
+        aulas               = aulas,
+        disponibilidad_prof = disponibilidad_prof,
+        tiempo_limite       = tiempo_limite,
+        num_workers         = num_workers,
+        verbose             = False,
+    )
+ 
+    if hA is None or hB is None:
+        raise HTTPException(
+            status_code=422,
+            detail="El solver no encontró una solución factible. "
+                   "Revisa disponibilidad de profesores y aulas.",
+        )
+ 
+    # ── 10. Mapas nombre → id ─────────────────────────────────────────────────
+    classroom_name_to_id = {c.name: c.id for c in db_classrooms}
+    course_name_to_id    = {c.name: c.id for c in db_courses}
+    professor_name_to_id = {
+        db_professors_map[pid].full_name: pid
+        for pid in professor_ids
+        if pid in db_professors_map
+    }
+ 
+    # ── 11. Limpiar datos previos de la sección ───────────────────────────────
+    db.query(ScheduleLesson).filter(ScheduleLesson.section_id == section_id).delete()
+    db.query(SectionCourse).filter(SectionCourse.section_id == section_id).delete()
+    db.flush()
+ 
+    # ── 12. Crear SectionCourse desde el horario generado ─────────────────────
+    # Una fila por (course_id, section_part) única.
+    # El profesor lo determinó el solver — no una asignación manual previa.
+    seen_sc: set[tuple[int, str | None]] = set()
+ 
+    def _collect_section_courses(horario: dict, part: str) -> None:
+        for lecciones in horario.values():
+            for entry in lecciones.values():
+                if entry is None:
+                    continue
+                course_id    = course_name_to_id.get(entry["materia"])
+                professor_id = professor_name_to_id.get(entry["profesor"])
+                if not course_id or not professor_id:
+                    continue
+ 
+                es_academica = (
+                    not entry["es_tecnica"]
+                    or entry["materia"] == "Educación Física"
+                )
+                sc_part = None if es_academica else part
+                key = (course_id, sc_part)
+ 
+                if key not in seen_sc:
+                    seen_sc.add(key)
+                    db.add(SectionCourse(
+                        section_id=section_id,
+                        course_id=course_id,
+                        professor_id=professor_id,
+                        section_part=sc_part,
+                    ))
+ 
+    _collect_section_courses(hA, "A")
+    _collect_section_courses(hB, "B")
+    db.flush()
+ 
+    # Reconstruir sc_map con los IDs recién generados
+    sc_rows_new = (
+        db.query(SectionCourse)
+        .filter(SectionCourse.section_id == section_id)
+        .all()
+    )
+    sc_map = {
+        (sc.section_id, sc.course_id, sc.section_part): sc.id
+        for sc in sc_rows_new
+    }
+ 
+    # ── 13. Persistir ScheduleLesson ──────────────────────────────────────────
+    def _persist_part(horario: dict, part: str, insert_academic: bool = True) -> None:
+        for dia_nombre, lecciones in horario.items():
+            day_of_week = DIAS.index(dia_nombre)
+            for lesson_num, entry in lecciones.items():
+                if entry is None:
+                    continue
+ 
+                es_academica = (
+                    not entry["es_tecnica"]
+                    or entry["materia"] == "Educación Física"
+                )
+ 
+                # Académicas solo se insertan una vez (desde parte A)
+                if es_academica and not insert_academic:
+                    continue
+ 
+                course_id    = course_name_to_id.get(entry["materia"])
+                professor_id = professor_name_to_id.get(entry["profesor"])
+                classroom_id = classroom_name_to_id.get(entry["aula"])
+ 
+                if not course_id or not professor_id or not classroom_id:
+                    continue
+ 
+                sc_part           = None if es_academica else part
+                section_course_id = sc_map.get((section_id, course_id, sc_part))
+ 
+                if not section_course_id:
+                    continue
+ 
+                db.add(ScheduleLesson(
+                    section_id        = section_id,
+                    section_course_id = section_course_id,
+                    professor_id      = professor_id,
+                    day_of_week       = day_of_week,
+                    lesson_number     = lesson_num,
+                    section_part      = sc_part,
+                    classroom_id      = classroom_id,
+                ))
+ 
+    _persist_part(hA, "A", insert_academic=True)
+    _persist_part(hB, "B", insert_academic=False)
+ 
+    db.commit()
+ 
+    # ── 14. Respuesta ─────────────────────────────────────────────────────────
+    return {
+        "section_id":   section_id,
+        "section_name": section.name,
+        "status":       "ok",
+        "schedule": {
+            "A": _horario_to_json(hA),
+            "B": _horario_to_json(hB),
+        },
+    }
+
+@router.get("/seccion/{section_id}")
+def get_schedule(
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """
+    Retorna el horario persistido de una sección (partes A y B).
+    """
+
+    # ── 1. Validar sección ────────────────────────────────────────────────────
+    section = db.query(Section).filter(Section.id == section_id).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Sección no encontrada")
+
+    # ── 2. Cargar lecciones con sus relaciones ────────────────────────────────
+    lessons = (
+        db.query(ScheduleLesson)
+        .filter(ScheduleLesson.section_id == section_id)
+        .order_by(ScheduleLesson.section_part, ScheduleLesson.day_of_week, ScheduleLesson.lesson_number)
+        .all()
+    )
+
+    if not lessons:
+        raise HTTPException(
+            status_code=404,
+            detail="Esta sección no tiene horario generado aún",
+        )
+
+    # ── 3. Precarga de nombres (evita N+1) ────────────────────────────────────
+    # ── 3. Precarga de nombres (evita N+1) ────────────────────────────────────
+    sc_ids        = {l.section_course_id for l in lessons}
+    professor_ids = {l.professor_id for l in lessons}
+    classroom_ids = {l.classroom_id for l in lessons}
+
+    sc_map         = {sc.id: sc for sc in db.query(SectionCourse).filter(SectionCourse.id.in_(sc_ids)).all()}
+    course_ids     = {sc.course_id for sc in sc_map.values()}
+
+    courses_map    = {c.id: c for c in db.query(Course).filter(Course.id.in_(course_ids)).all()}
+    professors_map = {p.id: p for p in db.query(User).filter(User.id.in_(professor_ids)).all()}
+    classrooms_map = {r.id: r for r in db.query(Classroom).filter(Classroom.id.in_(classroom_ids)).all()}
+    # ── 4. Armar estructura por parte ─────────────────────────────────────────
+    def _build_part(part: str | None) -> dict:
+        grid: dict[str, dict] = {dia: {} for dia in DIAS}
+        for lesson in lessons:
+            # Académicas (part=None) van en ambas partes
+            if lesson.section_part is not None and lesson.section_part != part:
+                continue
+            if lesson.section_part is None and part not in ("A", "B"):
+                continue
+
+            dia         = DIAS[lesson.day_of_week]
+            sc     = sc_map.get(lesson.section_course_id)
+            course = courses_map.get(sc.course_id) if sc else None
+            professor   = professors_map.get(lesson.professor_id)
+            classroom   = classrooms_map.get(lesson.classroom_id)
+
+            grid[dia][lesson.lesson_number] = {
+                "materia":    course.name if course else None,
+                "profesor":   professor.full_name if professor else None,
+                "aula":       classroom.name if classroom else None,
+                "es_tecnica": course.is_technical if course else False,
+            }
+        return grid
+
+    return {
+        "section_id":   section_id,
+        "section_name": section.name,
+        "schedule": {
+            "A": _build_part("A"),
+            "B": _build_part("B"),
+        },
+    }
+
+@router.get("/seccion/{section_id}/debug")
+def debug_section_data(
+    section_id: int,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    section = db.query(Section).filter(Section.id == section_id).first()
+    if not section:
+        raise HTTPException(404, "Sección no encontrada")
+
+    ssp_rows = db.query(SectionStudyPlan).filter(SectionStudyPlan.section_id == section_id).all()
+    all_plan_ids = list({r.study_plan_id for r in ssp_rows})
+
+    spc_rows = db.query(StudyPlanCourse).filter(StudyPlanCourse.study_plan_id.in_(all_plan_ids)).all()
+    course_ids = list({r.course_id for r in spc_rows})
+    db_courses = db.query(Course).filter(Course.id.in_(course_ids)).all()
+
+    sc_rows = db.query(SectionCourse).filter(SectionCourse.section_id == section_id).all()
+    professor_ids = list({sc.professor_id for sc in sc_rows} | ({section.guide_professor_id} if section.guide_professor_id else set()))
+
+    prof_courses = db.query(ProfessorCourse).filter(ProfessorCourse.professor_id.in_(professor_ids)).all()
+
+    db_classrooms = db.query(Classroom).filter(Classroom.is_active == True).all()
+
+    avail_rows = db.query(ProfessorAvailabilitySlot).filter(ProfessorAvailabilitySlot.professor_id.in_(professor_ids)).all()
+
+    return {
+        "section": {"id": section.id, "name": section.name, "guide_professor_id": section.guide_professor_id},
+        "study_plans": [{"id": r.study_plan_id, "part": r.part} for r in ssp_rows],
+        "plan_courses": [{"plan_id": r.study_plan_id, "course_id": r.course_id, "weekly_lessons": r.weekly_lessons} for r in spc_rows],
+        "courses": [{"id": c.id, "name": c.name, "is_technical": c.is_technical} for c in db_courses],
+        "section_courses": [{"course_id": sc.course_id, "professor_id": sc.professor_id, "section_part": sc.section_part} for sc in sc_rows],
+        "professor_courses": [{"professor_id": pc.professor_id, "course_id": pc.course_id} for pc in prof_courses],
+        "classrooms": [{"id": c.id, "name": c.name, "type": c.type.value} for c in db_classrooms],
+        "availability_slots": [{"professor_id": a.professor_id, "day": a.day_of_week, "lesson": a.lesson_number} for a in avail_rows],
+    }

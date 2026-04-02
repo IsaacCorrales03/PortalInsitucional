@@ -1,13 +1,29 @@
 from warnings import deprecated
 
 from sqlalchemy import (
-    String, Integer, ForeignKey, Date, Boolean,
+    CheckConstraint, String, Integer, ForeignKey, Date, Boolean,
     Time, DateTime, Numeric, Text, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 import datetime
 from decimal import Decimal
 from app.db.base import Base
+from sqlalchemy import Enum
+import enum as pyenum
+class ProfessorStatus(str, pyenum.Enum):
+    DISPONIBLE   = "disponible"
+    EN_REUNION   = "en_reunion"
+    SALIO_ANTES  = "salio_antes"
+    AUSENTE      = "ausente"
+    PERMISO      = "permiso"
+
+class ClassroomType(str, pyenum.Enum):
+    NARANJA     = "naranja"
+    VERDE       = "verde"
+    LAB_VERDE   = "lab_verde"
+    LAB_NARANJA = "lab_naranja"
+    ESPECIAL    = "especial"
+    GIMNASIO    = "gimnasio"
 
 # =========================
 # USERS
@@ -243,23 +259,84 @@ class Scholarship(Base):
 # PROFESSOR PROFILE
 # =========================
 class ProfessorProfile(Base):
-    """
-    current_status:
-      'disponible' | 'en_reunion' | 'salio_antes' | 'ausente' | 'permiso'
-
-    Puede ser modificado por el docente o por administrativos con
-    el permiso set_professor_status.
-    """
     __tablename__ = "professor_profiles"
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    specialty_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    current_status: Mapped[str] = mapped_column(String(50), default="disponible")
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), primary_key=True
+    )
+    specialty_id: Mapped[int | None] = mapped_column(
+        ForeignKey("specialties.id"), nullable=True
+    )
+    current_status: Mapped[ProfessorStatus] = mapped_column(
+        Enum(ProfessorStatus), default=ProfessorStatus.DISPONIBLE, nullable=False
+    )
     status_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime, nullable=True
     )
 
+
+class ProfessorCourse(Base):
+    __tablename__ = "professor_courses"
+
+    professor_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), primary_key=True
+    )
+    course_id: Mapped[int] = mapped_column(
+        ForeignKey("courses.id"), primary_key=True
+    )
+
+class StudyPlan(Base):
+    __tablename__ = "study_plans"
+
+    id = mapped_column(Integer, primary_key=True)
+    name = mapped_column(String(100), nullable=False)
+
+    year_level: Mapped[int | None] = mapped_column(
+        Integer,
+        CheckConstraint("year_level BETWEEN 1 AND 3", name="ck_courses_year_level"),
+        nullable=True,
+    )
+    specialty_id = mapped_column(ForeignKey("specialties.id"), nullable=True)
+
+class StudyPlanCourse(Base):
+    __tablename__ = "study_plan_courses"
+
+    id = mapped_column(Integer, primary_key=True)
+    study_plan_id = mapped_column(ForeignKey("study_plans.id"), nullable=False)
+    course_id = mapped_column(ForeignKey("courses.id"), nullable=False)
+    weekly_lessons = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("study_plan_id", "course_id", name="uq_plan_course"),
+    )
+
+class SectionStudyPlan(Base):
+    __tablename__ = "section_study_plans"
+
+    section_id: Mapped[int] = mapped_column(
+        ForeignKey("sections.id"), primary_key=True
+    )
+    study_plan_id: Mapped[int] = mapped_column(
+        ForeignKey("study_plans.id"), primary_key=True
+    )
+    part: Mapped[str | None] = mapped_column(
+        String(1),
+        CheckConstraint("part IN ('A', 'B')", name="ck_section_study_plan_part"),
+        nullable=False,
+        primary_key=True,  #
+    )
+
+class Course(Base):
+    __tablename__ = "courses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_technical: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    specialty_id: Mapped[int | None] = mapped_column(
+        ForeignKey("specialties.id"), nullable=True
+    )
 
 # =========================
 # ADMINISTRATIVE PROFILE
@@ -280,19 +357,8 @@ class AdministrativeProfile(Base):
 # =========================
 # COURSES & SECTIONS
 # =========================
-class Course(Base):
-    __tablename__ = "courses"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_guide: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    is_technical: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # nuevo
-    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    specialty_id: Mapped[int | None] = mapped_column(
-        ForeignKey("specialties.id"), nullable=True
-    )
-    year_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
+    
 class Section(Base):
     __tablename__ = "sections"
 
@@ -369,24 +435,36 @@ class ScheduleLesson(Base):
         UniqueConstraint("section_id", "section_part", "day_of_week", "lesson_number"),
     )
 
+
+
+
 class Classroom(Base):
     __tablename__ = "classrooms"
 
-    id = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    type: Mapped[ClassroomType] = mapped_column(Enum(ClassroomType), nullable=False)
+    capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    name = mapped_column(String(50), nullable=False, unique=True)  # "Aula 204"
-    building = mapped_column(String(100), nullable=True)           # opcional
-    floor = mapped_column(Integer, nullable=True)
 
-    capacity = mapped_column(Integer, nullable=True)
+class ClassroomAvailabilitySlot(Base):
+    __tablename__ = "classroom_availability_slots"
 
-    type = mapped_column(String(50), nullable=True)  
-    # 'regular' | 'laboratorio' | 'gimnasio' | etc.
+    classroom_id: Mapped[int] = mapped_column(
+        ForeignKey("classrooms.id"), primary_key=True
+    )
+    day_of_week: Mapped[int] = mapped_column(
+        Integer,
+        CheckConstraint("day_of_week BETWEEN 0 AND 4", name="ck_classroom_day"),
+        primary_key=True,
+    )
+    lesson_number: Mapped[int] = mapped_column(
+        Integer,
+        CheckConstraint("lesson_number BETWEEN 1 AND 12", name="ck_classroom_lesson"),
+        primary_key=True,
+    )
 
-    has_projector = mapped_column(Boolean, default=False)
-    has_computers = mapped_column(Boolean, default=False)
-
-    is_active = mapped_column(Boolean, default=True)
 class Enrollment(Base):
     """status: 'activo' | 'retirado' | 'aprobado' | 'reprobado'"""
     __tablename__ = "enrollments"
@@ -613,40 +691,7 @@ class Event(Base):
     )
 
 
-class StudyPlan(Base):
-    __tablename__ = "study_plans"
 
-    id = mapped_column(Integer, primary_key=True)
-    name = mapped_column(String(100), nullable=False)
-
-    year_level = mapped_column(Integer, nullable=False)
-    specialty_id = mapped_column(ForeignKey("specialties.id"), nullable=True)
-
-class StudyPlanCourse(Base):
-    __tablename__ = "study_plan_courses"
-
-    id = mapped_column(Integer, primary_key=True)
-    study_plan_id = mapped_column(ForeignKey("study_plans.id"), nullable=False)
-    course_id = mapped_column(ForeignKey("courses.id"), nullable=False)
-
-    part = mapped_column(String(1), nullable=True)  # A / B / NULL
-    weekly_lessons = mapped_column(Integer, nullable=False)
-
-class SectionStudyPlan(Base):
-    __tablename__ = "section_study_plans"
-
-    id = mapped_column(Integer, primary_key=True)
-
-    section_id = mapped_column(ForeignKey("sections.id"), nullable=False)
-    study_plan_id = mapped_column(ForeignKey("study_plans.id"), nullable=False)
-
-    part = mapped_column(String(1), nullable=True)  # A / B / NULL
-
-class ProfessorCourse(Base):
-    __tablename__ = "professor_courses"
-
-    professor_id = mapped_column(ForeignKey("users.id"), primary_key=True)
-    course_id = mapped_column(ForeignKey("courses.id"), primary_key=True)
 
 # =========================
 # PROFESSOR AVAILABILITY
@@ -654,18 +699,20 @@ class ProfessorCourse(Base):
 class ProfessorAvailabilitySlot(Base):
     __tablename__ = "professor_availability_slots"
 
-    id = mapped_column(Integer, primary_key=True)
-
-    professor_id = mapped_column(ForeignKey("users.id"), nullable=False)
-    day_of_week = mapped_column(Integer, nullable=False)   # 1–5 (lunes a viernes)
-    lesson_number = mapped_column(Integer, nullable=False)  # 1–12
-
-    # La presencia de una fila = disponible en ese slot
-    # La ausencia = no disponible
-    __table_args__ = (
-        UniqueConstraint("professor_id", "day_of_week", "lesson_number"),
+    professor_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), primary_key=True
     )
-    
+    day_of_week: Mapped[int] = mapped_column(
+        Integer,
+        CheckConstraint("day_of_week BETWEEN 0 AND 4", name="ck_availability_day"),
+        primary_key=True,
+    )
+    lesson_number: Mapped[int] = mapped_column(
+        Integer,
+        CheckConstraint("lesson_number BETWEEN 1 AND 12", name="ck_availability_lesson"),
+        primary_key=True,
+    )
+
 # =========================
 # VOTATION SYSTEM
 # =========================

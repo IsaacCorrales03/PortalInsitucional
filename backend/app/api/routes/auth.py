@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -40,6 +41,36 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         "token_type": "bearer"
     }
 
+@router.post("/login-form")
+def login_form(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == form_data.username).first()
+
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales inválidas")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Usuario inactivo")
+
+    role_names = [
+        r.name
+        for r in db.query(Role)
+        .join(UserRole, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id == user.id)
+        .all()
+    ]
+
+    token = create_access_token({
+        "sub": str(user.id),
+        "roles": role_names
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
 
 @router.put("/change-password")
 def change_password(data: ChangePasswordSchema, db: Session = Depends(get_db)):

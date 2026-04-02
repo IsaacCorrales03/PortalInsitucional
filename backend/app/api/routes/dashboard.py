@@ -149,7 +149,6 @@ def get_my_courses(
             description=course.description,
             professor_name=professor.full_name if professor else "Sin asignar",
             is_technical=is_technical,
-            is_guide=course.is_guide,
             section_part=sc.section_part,
             specialty_id=course.specialty_id
         ))

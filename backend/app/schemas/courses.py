@@ -26,6 +26,5 @@ class CourseOut(BaseModel):
     description: str | None = None
     professor_name: str
     is_technical: bool
-    is_guide: bool
     section_part: str | None = None
     specialty_id: int | None = None

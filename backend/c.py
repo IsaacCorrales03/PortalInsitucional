@@ -1,17 +1,40 @@
+"""
+seed.py
+=======
+Inicialización completa de la base de datos para el CTP Pavas.
+
+Crea:
+  - Roles y permisos
+  - Especialidades
+  - Materias (cursos)
+  - Lesson slots
+  - Aulas
+  - Planes académicos y técnicos
+  - Profesores con disponibilidad total y materias asignadas
+  - Usuario superadmin
+  - Sección 10-1 con planes, especialidades y asignación de profesores por materia
+"""
+
+import secrets
+import string
+from datetime import time
+
 from sqlalchemy.orm import Session
+
 from app.db.session import get_db
 from app.db.models import (
     ProfessorAvailabilitySlot, ProfessorCourse, ProfessorProfile,
     User, Role, Permission, UserRole, RolePermission, Specialty,
     Course, StudyPlan, StudyPlanCourse, Classroom, LessonSlot,
+    Section, SectionSpecialty, SectionStudyPlan, SectionCourse,
 )
 from app.core.security import hash_password
-import secrets, string
-from datetime import time
 
-# =========================
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CONSTANTES
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+
 TECHNICAL_COURSES = {
     "Tecnologías de Información, Comunicación y Servicios",
     "Administración y Soporte a Computadoras",
@@ -25,32 +48,18 @@ TECHNICAL_COURSES = {
     "Educación Física",
 }
 
-# year_level por materia (None = aparece en múltiples años, se hereda del StudyPlan)
-COURSE_YEAR_LEVEL = {
-    "Tecnologías de Información, Comunicación y Servicios": 1,
-    "Programación":                                         1,
-    "Emprendimiento":                                       2,
-    "Configuración y Soporte a Redes":                      None,  # años 2 y 3
-    "Tecnologías de la Información":                        3,
-    "Gestión Contable":                                     1,
-    "Gestión de Tecnologías Digitales Contables":           1,
-    # Las siguientes cruzan múltiples años → None
-    "Administración y Soporte a Computadoras":              None,
-    "Inglés Técnico":                                       None,
-    "Educación Física":                                     None,
-}
-
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
 # PLANES TÉCNICOS
-# =========================
-config_plans = [
+# ══════════════════════════════════════════════════════════════════════════════
+
+CONFIG_PLANS = [
     {
         "name": "Config y Soporte 1",
         "year": 1,
         "courses": [
             ("Tecnologías de Información, Comunicación y Servicios", 6),
             ("Administración y Soporte a Computadoras",              12),
-            ("Programación",                                          12),
+            ("Programación",                                         12),
             ("Inglés Técnico",                                        6),
             ("Educación Física",                                      2),
         ],
@@ -59,11 +68,11 @@ config_plans = [
         "name": "Config y Soporte 2",
         "year": 2,
         "courses": [
-            ("Emprendimiento",                         3),
+            ("Emprendimiento",                          3),
             ("Administración y Soporte a Computadoras", 4),
-            ("Configuración y Soporte a Redes",        5),
-            ("Inglés Técnico",                         3),
-            ("Educación Física",                       2),
+            ("Configuración y Soporte a Redes",         5),
+            ("Inglés Técnico",                          3),
+            ("Educación Física",                        2),
         ],
     },
     {
@@ -71,111 +80,76 @@ config_plans = [
         "year": 3,
         "courses": [
             ("Inglés Técnico",                          3),
-            ("Tecnologías de la Información",            4),
+            ("Tecnologías de la Información",           4),
             ("Configuración y Soporte a Redes",         5),
             ("Administración y Soporte a Computadoras", 4),
         ],
     },
 ]
 
-accounting_plans = [
+ACCOUNTING_PLANS = [
     {
         "name": "Contabilidad 1",
         "year": 1,
         "courses": [
             ("Gestión Contable",                           18),
-            ("Inglés Técnico",                             6),
-            ("Educación Física",                           2),
+            ("Inglés Técnico",                              6),
+            ("Educación Física",                            2),
             ("Gestión de Tecnologías Digitales Contables", 12),
         ],
-    }
+    },
 ]
 
-# =========================
-# LESSON SLOTS
-# =========================
-def create_lesson_slots(db: Session):
-    """
-    Inserta los 12 slots de lección con su horario real.
-    Idempotente.
-    """
-    schedule = [
-        (1,  time(7, 0),   time(7, 40)),
-        (2,  time(7, 40),  time(8, 20)),
-        (3,  time(8, 20),  time(9, 0)),
-        (4,  time(9, 0),   time(9, 40)),
-        (5,  time(9, 40),  time(10, 20)),
-        (6,  time(10, 20), time(11, 0)),
-        (7,  time(11, 0),  time(11, 40)),
-        (8,  time(11, 40), time(12, 20)),
-        (9,  time(12, 20), time(13, 0)),
-        (10, time(13, 0),  time(13, 40)),
-        (11, time(13, 40), time(14, 20)),
-        (12, time(14, 20), time(15, 0)),
-    ]
+# ══════════════════════════════════════════════════════════════════════════════
+# ASIGNACIÓN DE PROFESORES POR MATERIA EN LA SECCIÓN 10-1
+# (course_name, professor_full_name, section_part)
+# section_part=None  → materia académica (ambas partes)
+# section_part="A"   → materia técnica parte A
+# section_part="B"   → materia técnica parte B
+# ══════════════════════════════════════════════════════════════════════════════
 
-    for number, start, end in schedule:
-        exists = db.query(LessonSlot).filter(LessonSlot.number == number).first()
-        if not exists:
-            db.add(LessonSlot(number=number, start_time=start, end_time=end))
-            print(f"  Slot L{number}: {start}–{end}")
-        else:
-            print(f"  Slot L{number}: ya existe")
+SECTION_COURSE_ASSIGNMENTS = [
+    # ── Académicas (compartidas A y B) ────────────────────────────────────
+    ("Español",           "Martha",     None),
+    ("Matemáticas",       "Diego",      None),
+    ("Física Matemática", "Gaby",       None),
+    ("Estudios Sociales", "Yendry",     None),
+    ("Educación Cívica",  "Yendry",     None),
+    ("Inglés Académico",  "Natalia",    None),
+    ("Educación Musical", "Alberto",    None),
+    ("Guía",              "Martha",     None),
+    ("Ética",             "Josefa",     None),
 
-    db.commit()
+    # ── Técnicas parte A (Config y Soporte) ───────────────────────────────
+    ("Tecnologías de Información, Comunicación y Servicios", "Carlos M.", "A"),
+    ("Administración y Soporte a Computadoras",              "Carlos M.", "A"),
+    ("Programación",                                         "Keneth C.", "A"),
+    ("Inglés Técnico",                                       "Lizeth O.", "A"),
+    ("Educación Física",                                     "Magaly",    "A"),
 
-
-# =========================
-# CLASSROOMS
-# =========================
-def create_classrooms(db: Session):
-    bases = [
-        {"prefix": "Aula Naranja",        "type": "regular",     "capacity": 30},
-        {"prefix": "Aula Verde",          "type": "regular",     "capacity": 30},
-        {"prefix": "Laboratorio Naranja", "type": "laboratorio", "capacity": 25, "has_computers": True},
-        {"prefix": "Laboratorio Verde",   "type": "laboratorio", "capacity": 25, "has_computers": True},
-    ]
-
-    for base in bases:
-        for i in range(1, 7):
-            name = f"{base['prefix']} {i}"
-            if not db.query(Classroom).filter(Classroom.name == name).first():
-                db.add(Classroom(
-                    name=name,
-                    type=base["type"],
-                    capacity=base["capacity"],
-                    has_computers=base.get("has_computers", False),
-                    has_projector=True,
-                    is_active=True,
-                ))
-                print(f"  Aula creada: {name}")
-            else:
-                print(f"  Aula ya existe: {name}")
-
-    especiales = [
-        {"name": "Gimnasio",      "type": "gimnasio", "capacity": 50},
-        {"name": "Aula especial", "type": "especial", "capacity": 20},
-    ]
-    for data in especiales:
-        if not db.query(Classroom).filter(Classroom.name == data["name"]).first():
-            db.add(Classroom(
-                name=data["name"],
-                type=data["type"],
-                capacity=data["capacity"],
-                has_projector=True,
-                is_active=True,
-            ))
-            print(f"  Aula creada: {data['name']}")
-        else:
-            print(f"  Aula ya existe: {data['name']}")
-
-    db.commit()
+    # ── Técnicas parte B (Contabilidad) ───────────────────────────────────
+    ("Gestión Contable",                           "Gerardo S.", "B"),
+    ("Inglés Técnico",                             "Henry F.",   "B"),
+    ("Educación Física",                           "Magaly",     "B"),
+    ("Gestión de Tecnologías Digitales Contables", "Gerardo S.", "B"),
+]
 
 
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_password(length: int = 16) -> str:
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ROLES
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+
 def create_roles(db: Session) -> dict:
+    print("\n── Roles ───────────────────────────────────────────────")
     role_names = ["superadmin", "admin", "profesor", "estudiante"]
     created = {}
 
@@ -194,16 +168,61 @@ def create_roles(db: Session) -> dict:
     return created
 
 
-# =========================
-# SPECIALTIES
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+# PERMISOS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def create_permissions(db: Session, super_role: Role):
+    print("\n── Permisos ────────────────────────────────────────────")
+    all_permissions = {
+        "manage_users":         "Gestionar usuarios del sistema",
+        "manage_courses":       "Gestionar cursos",
+        "manage_sections":      "Gestionar secciones",
+        "manage_enrollments":   "Gestionar inscripciones",
+        "assign_professors":    "Asignar profesores a secciones",
+        "manage_specialties":   "Gestionar especialidades",
+        "manage_permissions":   "Gestionar permisos del sistema",
+        "manage_events":        "Gestionar eventos institucionales",
+        "schedule_meetings":    "Programar reuniones",
+        "manage_scholarships":  "Gestionar becas",
+        "set_professor_status": "Actualizar estado de docentes",
+        "manage_admissions":    "Gestionar admisiones",
+        "view_grade_reports":   "Ver boletines de calificaciones",
+        "send_announcements":   "Enviar anuncios institucionales",
+    }
+
+    for code, description in all_permissions.items():
+        perm = db.query(Permission).filter(Permission.code == code).first()
+        if not perm:
+            perm = Permission(code=code, description=description)
+            db.add(perm)
+            db.commit()
+            db.refresh(perm)
+            print(f"  Permiso creado: {code}")
+        else:
+            print(f"  Permiso ya existe: {code}")
+
+        exists = db.query(RolePermission).filter(
+            RolePermission.role_id       == super_role.id,
+            RolePermission.permission_id == perm.id,
+        ).first()
+        if not exists:
+            db.add(RolePermission(role_id=super_role.id, permission_id=perm.id))
+            db.commit()
+            print(f"    → asignado a superadmin")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESPECIALIDADES
+# ══════════════════════════════════════════════════════════════════════════════
+
 def create_specialties(db: Session):
+    print("\n── Especialidades ──────────────────────────────────────")
     specialties = [
         {
             "name": "Configuración y Soporte",
             "description": (
-                "La especialidad Configuración y Soporte a Redes de Comunicación y Sistemas Operativos "
-                "forma técnicos capaces de instalar, configurar y mantener redes de comunicación y "
+                "Forma técnicos capaces de instalar, configurar y mantener redes de comunicación y "
                 "sistemas operativos, brindar soporte técnico, garantizar seguridad informática y "
                 "resolver problemas en infraestructuras tecnológicas."
             ),
@@ -211,17 +230,16 @@ def create_specialties(db: Session):
         {
             "name": "Contabilidad",
             "description": (
-                "La especialidad Contabilidad forma técnicos capaces de registrar, analizar e interpretar "
-                "información financiera, elaborar estados contables, gestionar libros y documentos contables, "
-                "y aplicar normas tributarias y de auditoría."
+                "Forma técnicos capaces de registrar, analizar e interpretar información financiera, "
+                "elaborar estados contables, gestionar libros y documentos contables, y aplicar "
+                "normas tributarias y de auditoría."
             ),
         },
         {
             "name": "Ejecutivo Comercial y servicio al cliente",
             "description": (
-                "La especialidad Ejecutivo Comercial forma profesionales capaces de planificar, gestionar "
-                "y ejecutar estrategias de ventas, captar y mantener clientes, negociar contratos y "
-                "promocionar productos o servicios."
+                "Forma profesionales capaces de planificar, gestionar y ejecutar estrategias de ventas, "
+                "captar y mantener clientes, negociar contratos y promocionar productos o servicios."
             ),
         },
         {
@@ -270,10 +288,13 @@ def create_specialties(db: Session):
                 print(f"  Especialidad ya existe: {spec['name']}")
 
 
-# =========================
-# COURSES
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+# MATERIAS
+# ══════════════════════════════════════════════════════════════════════════════
+
 def create_courses(db: Session) -> dict:
+    print("\n── Materias ────────────────────────────────────────────")
+
     course_list = [
         "Español", "Matemáticas", "Física Matemática", "Estudios Sociales",
         "Educación Cívica", "Inglés Académico", "Educación Musical",
@@ -310,18 +331,14 @@ def create_courses(db: Session) -> dict:
         "Gestión de Tecnologías Digitales Contables":            "Herramientas digitales aplicadas a contabilidad.",
     }
 
-    specialty_map = {
-        "TEC":  "Configuración y Soporte",
-        "CONT": "Contabilidad",
-    }
-    course_specialty_key = {
-        "Programación":                                         "TEC",
-        "Administración y Soporte a Computadoras":              "TEC",
-        "Configuración y Soporte a Redes":                      "TEC",
-        "Tecnologías de la Información":                        "TEC",
-        "Tecnologías de Información, Comunicación y Servicios": "TEC",
-        "Gestión Contable":                                     "CONT",
-        "Gestión de Tecnologías Digitales Contables":           "CONT",
+    specialty_course_map = {
+        "Programación":                                         "Configuración y Soporte",
+        "Administración y Soporte a Computadoras":              "Configuración y Soporte",
+        "Configuración y Soporte a Redes":                      "Configuración y Soporte",
+        "Tecnologías de la Información":                        "Configuración y Soporte",
+        "Tecnologías de Información, Comunicación y Servicios": "Configuración y Soporte",
+        "Gestión Contable":                                     "Contabilidad",
+        "Gestión de Tecnologías Digitales Contables":           "Contabilidad",
     }
 
     specialties = {s.name: s.id for s in db.query(Specialty).all()}
@@ -329,23 +346,16 @@ def create_courses(db: Session) -> dict:
 
     for name in course_list:
         course = db.query(Course).filter(Course.name == name).first()
-        desc = descriptions.get(name)
-        key = course_specialty_key.get(name)
-        specialty_name = specialty_map.get(key) if key else None
-        specialty_id = specialties.get(specialty_name) if specialty_name else None
-        year_level = COURSE_YEAR_LEVEL.get(name)  # None para académicas y las que cruzan años
-
-        if specialty_name and not specialty_id:
-            raise Exception(f"Specialty no existe en DB: {specialty_name}")
+        desc          = descriptions.get(name)
+        spec_name     = specialty_course_map.get(name)
+        specialty_id  = specialties.get(spec_name) if spec_name else None
 
         if not course:
             course = Course(
                 name=name,
-                is_guide=(name == "Guía"),
                 is_technical=(name in TECHNICAL_COURSES),
                 description=desc,
                 specialty_id=specialty_id,
-                year_level=year_level,
             )
             db.add(course)
             db.commit()
@@ -359,12 +369,6 @@ def create_courses(db: Session) -> dict:
             if course.specialty_id != specialty_id:
                 course.specialty_id = specialty_id
                 updated = True
-            if name == "Guía" and not course.is_guide:
-                course.is_guide = True
-                updated = True
-            if course.year_level != year_level:
-                course.year_level = year_level
-                updated = True
             if updated:
                 db.commit()
                 db.refresh(course)
@@ -377,10 +381,85 @@ def create_courses(db: Session) -> dict:
     return created
 
 
-# =========================
-# STUDY PLANS (ACADÉMICOS)
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+# LESSON SLOTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def create_lesson_slots(db: Session):
+    print("\n── Lesson Slots ────────────────────────────────────────")
+    schedule = [
+        (1,  time(7, 0),   time(7, 40)),
+        (2,  time(7, 40),  time(8, 20)),
+        (3,  time(8, 20),  time(9, 0)),
+        (4,  time(9, 0),   time(9, 40)),
+        (5,  time(9, 40),  time(10, 20)),
+        (6,  time(10, 20), time(11, 0)),
+        (7,  time(11, 0),  time(11, 40)),
+        (8,  time(11, 40), time(12, 20)),
+        (9,  time(12, 20), time(13, 0)),
+        (10, time(13, 0),  time(13, 40)),
+        (11, time(13, 40), time(14, 20)),
+        (12, time(14, 20), time(15, 0)),
+    ]
+
+    for number, start, end in schedule:
+        exists = db.query(LessonSlot).filter(LessonSlot.number == number).first()
+        if not exists:
+            db.add(LessonSlot(number=number, start_time=start, end_time=end))
+            print(f"  Slot L{number}: {start}–{end}")
+        else:
+            print(f"  Slot L{number}: ya existe")
+
+    db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AULAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def create_classrooms(db: Session):
+    print("\n── Aulas ───────────────────────────────────────────────")
+    bases = [
+        {"prefix": "Aula Naranja",        "type": "naranja",     "capacity": 30},
+        {"prefix": "Aula Verde",          "type": "verde",       "capacity": 30},
+        {"prefix": "Laboratorio Naranja", "type": "lab_naranja", "capacity": 25},
+        {"prefix": "Laboratorio Verde",   "type": "lab_verde",   "capacity": 25},
+    ]
+
+    for base in bases:
+        for i in range(1, 7):
+            name = f"{base['prefix']} {i}"
+            if not db.query(Classroom).filter(Classroom.name == name).first():
+                db.add(Classroom(
+                    name=name,
+                    type=base["type"],
+                    capacity=base["capacity"],
+                    is_active=True,
+                ))
+                print(f"  Aula creada: {name}")
+            else:
+                print(f"  Aula ya existe: {name}")
+
+    for data in [
+        {"name": "Gimnasio",      "type": "gimnasio", "capacity": 50},
+        {"name": "Aula Especial", "type": "especial", "capacity": 20},
+    ]:
+        if not db.query(Classroom).filter(Classroom.name == data["name"]).first():
+            db.add(Classroom(name=data["name"], type=data["type"],
+                             capacity=data["capacity"], is_active=True))
+            print(f"  Aula creada: {data['name']}")
+        else:
+            print(f"  Aula ya existe: {data['name']}")
+
+    db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PLANES ACADÉMICOS
+# ══════════════════════════════════════════════════════════════════════════════
+
 def create_academic_study_plans(db: Session, courses: dict):
+    print("\n── Planes académicos ───────────────────────────────────")
     plans = [
         {
             "name": "Plan Académico 1",
@@ -447,19 +526,14 @@ def create_academic_study_plans(db: Session, courses: dict):
 
         for course_name, weekly_lessons in plan_data["courses"]:
             course = courses[course_name]
-
-            # Académicas: part=None (ambas partes juntas)
             exists = db.query(StudyPlanCourse).filter(
                 StudyPlanCourse.study_plan_id == plan.id,
-                StudyPlanCourse.course_id == course.id,
-                StudyPlanCourse.part.is_(None),
+                StudyPlanCourse.course_id     == course.id,
             ).first()
-
             if not exists:
                 db.add(StudyPlanCourse(
                     study_plan_id=plan.id,
                     course_id=course.id,
-                    part=None,
                     weekly_lessons=weekly_lessons,
                 ))
                 db.commit()
@@ -472,10 +546,12 @@ def create_academic_study_plans(db: Session, courses: dict):
                 print(f"    · {course_name} ya existe")
 
 
-# =========================
-# STUDY PLANS (TÉCNICOS)
-# =========================
+# ══════════════════════════════════════════════════════════════════════════════
+# PLANES TÉCNICOS
+# ══════════════════════════════════════════════════════════════════════════════
+
 def create_specialty_plans(db: Session, courses: dict, specialty_name: str, plans: list):
+    print(f"\n── Planes técnicos: {specialty_name} ──────────────────")
     specialty = db.query(Specialty).filter(Specialty.name == specialty_name).first()
     if not specialty:
         raise Exception(f"Especialidad no encontrada: {specialty_name}")
@@ -495,47 +571,39 @@ def create_specialty_plans(db: Session, courses: dict, specialty_name: str, plan
         else:
             print(f"  Plan ya existe: {plan.name}")
 
+        # ── FIX: el for y el db.add están correctamente indentados ──────────
         for cname, weekly_lessons in plan_data["courses"]:
             course = courses.get(cname)
             if not course:
                 print(f"    ⚠ Curso no encontrado: {cname}")
                 continue
 
-            # Técnicas: se crean dos filas, una por parte (A y B)
-            # Cada parte tendrá su propio profesor asignado en SectionCourse
-            for part in ("A", "B"):
-                exists = db.query(StudyPlanCourse).filter(
-                    StudyPlanCourse.study_plan_id == plan.id,
-                    StudyPlanCourse.course_id == course.id,
-                    StudyPlanCourse.part == part,
-                ).first()
-
-                if not exists:
-                    db.add(StudyPlanCourse(
-                        study_plan_id=plan.id,
-                        course_id=course.id,
-                        part=part,
-                        weekly_lessons=weekly_lessons,
-                    ))
-                    print(f"    + {cname} parte {part} ({weekly_lessons} lec/sem)")
-                elif exists.weekly_lessons != weekly_lessons:
-                    exists.weekly_lessons = weekly_lessons
-                    print(f"    ~ {cname} parte {part} actualizado a {weekly_lessons} lec/sem")
-                else:
-                    print(f"    · {cname} parte {part} ya existe")
-
-        db.commit()
+            exists = db.query(StudyPlanCourse).filter(
+                StudyPlanCourse.study_plan_id == plan.id,
+                StudyPlanCourse.course_id     == course.id,
+            ).first()
+            if not exists:
+                db.add(StudyPlanCourse(
+                    study_plan_id=plan.id,
+                    course_id=course.id,
+                    weekly_lessons=weekly_lessons,
+                ))
+                db.commit()
+                print(f"    + {cname} ({weekly_lessons} lec/sem)")
+            elif exists.weekly_lessons != weekly_lessons:
+                exists.weekly_lessons = weekly_lessons
+                db.commit()
+                print(f"    ~ {cname} actualizado a {weekly_lessons} lec/sem")
+            else:
+                print(f"    · {cname} ya existe")
 
 
-# =========================
-# PROFESSORS
-# =========================
-def generate_password(length: int = 16) -> str:
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
+# ══════════════════════════════════════════════════════════════════════════════
+# PROFESORES
+# ══════════════════════════════════════════════════════════════════════════════
 
 def create_professors(db: Session):
+    print("\n── Profesores ──────────────────────────────────────────")
     role = db.query(Role).filter(Role.name == "profesor").first()
     if not role:
         raise Exception("Rol 'profesor' no existe. Ejecuta create_roles() primero.")
@@ -590,20 +658,17 @@ def create_professors(db: Session):
         "Gerardo S.": ["Gestión Contable", "Gestión de Tecnologías Digitales Contables"],
     }
 
-    all_courses = db.query(Course).all()
-    course_map = {c.name: c for c in all_courses}
-    missing_courses: set[str] = set()
-    created_users: list[tuple[str, str]] = []
+    course_map    = {c.name: c for c in db.query(Course).all()}
+    created_users = []
 
     for name, course_names in base_data.items():
-        email = f"{name.lower()}@portal.com"
+        email = f"{name.lower().replace(' ', '_').replace('.', '')}@portal.com"
 
         if db.query(User).filter(User.email == email).first():
             print(f"  Profesor ya existe: {name}")
             continue
 
         password = generate_password()
-
         user = User(
             email=email,
             full_name=name,
@@ -614,99 +679,42 @@ def create_professors(db: Session):
         db.add(user)
         db.flush()
 
-        # Rol
         db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.add(ProfessorProfile(user_id=user.id, current_status="disponible"))
 
-        # Perfil de profesor
-        db.add(ProfessorProfile(
-            user_id=user.id,
-            specialty_area=None,
-            current_status="disponible",
-        ))
-
-        # Disponibilidad: todos los slots de la semana (días 1–5, lecciones 1–12)
-        # La presencia de una fila = disponible en ese slot
-        for day in range(1, 6):       # 1=lunes … 5=viernes
-            for lesson in range(1, 13):  # 1–12
+        # Disponibilidad total (5 días × 12 lecciones)
+        for day in range(5):
+            for lesson in range(1, 13):
                 db.add(ProfessorAvailabilitySlot(
                     professor_id=user.id,
                     day_of_week=day,
                     lesson_number=lesson,
                 ))
 
-        # Materias que puede impartir
         for cname in course_names:
             course = course_map.get(cname)
-            if not course:
-                missing_courses.add(cname)
-                continue
-            db.add(ProfessorCourse(professor_id=user.id, course_id=course.id))
+            if course:
+                db.add(ProfessorCourse(professor_id=user.id, course_id=course.id))
+            else:
+                print(f"    ⚠ Curso no encontrado para {name}: {cname}")
 
-        created_users.append((email, password))
-
-    db.commit()
+        db.commit()
+        created_users.append((name, email, password))
+        print(f"  Profesor creado: {name}")
 
     if created_users:
-        print("\n  === PROFESORES CREADOS ===")
-        for email, password in created_users:
-            print(f"  {email:<35} | {password}")
-
-    if missing_courses:
-        print("\n  ⚠ Cursos no encontrados en DB:")
-        for m in sorted(missing_courses):
-            print(f"  - {m}")
+        print("\n  ╔══ CREDENCIALES GENERADAS ══════════════════════════════╗")
+        for name, email, password in created_users:
+            print(f"  ║  {name:<15} {email:<35} {password}")
+        print("  ╚════════════════════════════════════════════════════════╝")
 
 
-# =========================
-# PERMISSIONS
-# =========================
-def create_permissions(db: Session, super_role: Role):
-    all_permissions = {
-        "manage_users":         "Gestionar usuarios del sistema",
-        "manage_courses":       "Gestionar cursos",
-        "manage_sections":      "Gestionar secciones",
-        "manage_enrollments":   "Gestionar inscripciones",
-        "assign_professors":    "Asignar profesores a secciones",
-        "manage_specialties":   "Gestionar especialidades",
-        "manage_permissions":   "Gestionar permisos del sistema",
-        "manage_events":        "Gestionar eventos institucionales",
-        "schedule_meetings":    "Programar reuniones",
-        "manage_scholarships":  "Gestionar becas",
-        "set_professor_status": "Actualizar estado de docentes",
-        "manage_admissions":    "Gestionar admisiones",
-        "view_grade_reports":   "Ver boletines de calificaciones",
-        "send_announcements":   "Enviar anuncios institucionales",
-    }
+# ══════════════════════════════════════════════════════════════════════════════
+# SUPERADMIN
+# ══════════════════════════════════════════════════════════════════════════════
 
-    for code, description in all_permissions.items():
-        perm = db.query(Permission).filter(Permission.code == code).first()
-        if not perm:
-            perm = Permission(code=code, description=description)
-            db.add(perm)
-            db.commit()
-            db.refresh(perm)
-            print(f"  Permiso creado: {code}")
-        elif not perm.description:
-            perm.description = description
-            db.commit()
-            print(f"  Descripción actualizada: {code}")
-        else:
-            print(f"  Permiso ya existe: {code}")
-
-        exists = db.query(RolePermission).filter(
-            RolePermission.role_id == super_role.id,
-            RolePermission.permission_id == perm.id,
-        ).first()
-        if not exists:
-            db.add(RolePermission(role_id=super_role.id, permission_id=perm.id))
-            db.commit()
-            print(f"    → asignado a superadmin")
-
-
-# =========================
-# SUPERADMIN USER
-# =========================
 def create_superadmin_user(db: Session, super_role: Role):
+    print("\n── Usuario superadmin ──────────────────────────────────")
     super_email = "superadmin@portal.com"
     user = db.query(User).filter(User.email == super_email).first()
 
@@ -724,58 +732,151 @@ def create_superadmin_user(db: Session, super_role: Role):
         db.refresh(user)
         db.add(UserRole(user_id=user.id, role_id=super_role.id))
         db.commit()
-        print(f"\n  Superadmin creado: {super_email}")
+        print(f"  Superadmin creado: {super_email}")
         print(f"  Contraseña:        {password}")
     else:
-        print(f"\n  Superadmin ya existe: {super_email}")
+        print(f"  Superadmin ya existe: {super_email}")
 
 
-# =========================
-# ENTRY POINT PRINCIPAL
-# =========================
-def create_superadmin(db: Session):
-    print("\n── Roles ───────────────────────────────────────")
+# ══════════════════════════════════════════════════════════════════════════════
+# SECCIÓN 10-1
+# ══════════════════════════════════════════════════════════════════════════════
+
+def create_sections(db: Session):
+    print("\n── Sección 10-1 ────────────────────────────────────────")
+
+    # ── Sección base ──────────────────────────────────────────────────────────
+    section = db.query(Section).filter(Section.name == "10-1").first()
+    if not section:
+        guide = db.query(User).filter(User.full_name == "Martha").first()
+        section = Section(
+            name="10-1",
+            academic_year="2025",
+            guide_professor_id=guide.id if guide else None,
+        )
+        db.add(section)
+        db.commit()
+        db.refresh(section)
+        print(f"  Sección creada: 10-1 (guía: {'Martha' if guide else 'sin asignar'})")
+    else:
+        print("  Sección ya existe: 10-1")
+
+    # ── Especialidades por parte ──────────────────────────────────────────────
+    specialty_a = db.query(Specialty).filter(Specialty.name == "Configuración y Soporte").first()
+    specialty_b = db.query(Specialty).filter(Specialty.name == "Contabilidad").first()
+
+    for part, specialty in [("A", specialty_a), ("B", specialty_b)]:
+        if not specialty:
+            print(f"  ⚠ Especialidad no encontrada para parte {part}")
+            continue
+        exists = db.query(SectionSpecialty).filter(
+            SectionSpecialty.section_id   == section.id,
+            SectionSpecialty.specialty_id == specialty.id,
+            SectionSpecialty.part         == part,
+        ).first()
+        if not exists:
+            db.add(SectionSpecialty(
+                section_id=section.id,
+                specialty_id=specialty.id,
+                part=part,
+            ))
+            print(f"  Especialidad parte {part}: {specialty.name}")
+        else:
+            print(f"  Especialidad parte {part} ya existe: {specialty.name}")
+
+    db.commit()
+
+    # ── Planes de estudio ─────────────────────────────────────────────────────
+    # Plan académico → part=None (compartido A y B)
+    # Plan técnico A → part="A"
+    # Plan técnico B → part="B"
+    plan_config = [
+        ("Plan Académico 1",   "A"),  # ← compartido, se inserta dos veces
+        ("Plan Académico 1",   "B"),
+        ("Config y Soporte 1", "A"),
+        ("Contabilidad 1",     "B"),
+    ]
+
+    for plan_name, part in plan_config:
+        plan = db.query(StudyPlan).filter(StudyPlan.name == plan_name).first()
+        if not plan:
+            print(f"  ⚠ Plan no encontrado: {plan_name}")
+            continue
+
+        exists = db.query(SectionStudyPlan).filter(
+            SectionStudyPlan.section_id    == section.id,
+            SectionStudyPlan.study_plan_id == plan.id,
+            SectionStudyPlan.part          == part,
+        ).first()
+        if not exists:
+            db.add(SectionStudyPlan(
+                section_id=section.id,
+                study_plan_id=plan.id,
+                part=part,
+            ))
+            print(f"  Plan '{plan_name}' → part={part}")
+        else:
+            print(f"  Plan '{plan_name}' part={part} ya existe")
+
+    db.commit()
+
+    # ── SectionCourse: profesor por materia ───────────────────────────────────
+    course_map    = {c.name: c for c in db.query(Course).all()}
+    professor_map = {u.full_name: u for u in db.query(User).all()}
+
+    for course_name, prof_name, part in SECTION_COURSE_ASSIGNMENTS:
+        course    = course_map.get(course_name)
+        professor = professor_map.get(prof_name)
+
+        if not course:
+            print(f"  ⚠ Curso no encontrado: {course_name}")
+            continue
+        if not professor:
+            print(f"  ⚠ Profesor no encontrado: {prof_name}")
+            continue
+
+        exists = db.query(SectionCourse).filter(
+            SectionCourse.section_id   == section.id,
+            SectionCourse.course_id    == course.id,
+            SectionCourse.section_part == part,
+        ).first()
+        if not exists:
+            db.add(SectionCourse(
+                section_id=section.id,
+                course_id=course.id,
+                professor_id=professor.id,
+                section_part=part,
+            ))
+            print(f"  SectionCourse [{part or 'común'}] {course_name} → {prof_name}")
+        else:
+            print(f"  SectionCourse [{part or 'común'}] {course_name} ya existe")
+
+    db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ENTRY POINT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_seed(db: Session):
     roles = create_roles(db)
-
-    print("\n── Especialidades ──────────────────────────────")
-    create_specialties(db)
-
-    print("\n── Materias ────────────────────────────────────")
-    courses = create_courses(db)
-
-    print("\n── Lesson Slots ────────────────────────────────")
-    create_lesson_slots(db)
-
-    print("\n── Aulas ───────────────────────────────────────")
-    create_classrooms(db)
-
-    print("\n── Planes académicos ───────────────────────────")
-    create_academic_study_plans(db, courses)
-
-    print("\n── Planes técnicos: Configuración y Soporte ────")
-    create_specialty_plans(db, courses, "Configuración y Soporte", config_plans)
-
-    print("\n── Planes técnicos: Contabilidad ───────────────")
-    create_specialty_plans(db, courses, "Contabilidad", accounting_plans)
-
-    print("\n── Profesores ──────────────────────────────────")
-    create_professors(db)
-
-    print("\n── Permisos ────────────────────────────────────")
     create_permissions(db, roles["superadmin"])
-
-    print("\n── Usuario superadmin ──────────────────────────")
+    create_specialties(db)
+    courses = create_courses(db)
+    create_lesson_slots(db)
+    create_classrooms(db)
+    create_academic_study_plans(db, courses)
+    create_specialty_plans(db, courses, "Configuración y Soporte", CONFIG_PLANS)
+    create_specialty_plans(db, courses, "Contabilidad", ACCOUNTING_PLANS)
+    create_professors(db)
     create_superadmin_user(db, roles["superadmin"])
+    create_sections(db)
+    print("\n✅ Seed completo.\n")
 
-    print("\n✅ Inicialización completa.\n")
 
-
-# =========================
-# MAIN
-# =========================
 if __name__ == "__main__":
     db = next(get_db())
     try:
-        create_superadmin(db)
+        run_seed(db)
     finally:
         db.close()

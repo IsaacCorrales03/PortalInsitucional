@@ -1,12 +1,15 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import os
 
 from app.api.routes import admin, auth, specialities, dashboard
+from app.core.security import create_access_token, verify_password
 from app.db.session import get_db
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login-form")
 # =========================
 # Cargar variables de entorno
 # =========================
@@ -62,3 +65,4 @@ def health_check():
 @app.get("/test-db")
 def test_db(db: Session = Depends(get_db)):
     return {"message": "DB conectada"}
+
