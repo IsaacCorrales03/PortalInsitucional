@@ -4,7 +4,7 @@ LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
 
 # Activar entorno virtual (bash)
-source backend/venv/bin/activate
+source backend/python/Scripts/activate
 pip install -r backend/requirements.txt
 # Backend
 cd backend || exit

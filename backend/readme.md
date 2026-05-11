@@ -38,7 +38,7 @@ Sistema institucional con múltiples roles (estudiante, profesor, administrativo
 
 ### Horarios
 - [x] CRUD horarios
-- [ ] Lógica de clase actual
+- [x] Lógica de clase actual
 
 ### Asistencia
 - [ ] Registro de asistencia
